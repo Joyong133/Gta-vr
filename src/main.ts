@@ -53,6 +53,11 @@ async function startXR(): Promise<void> {
   }
 }
 
+// Touch-only devices: no on-screen controls in v1.
+if (window.matchMedia?.('(pointer: coarse)').matches && !window.matchMedia?.('(pointer: fine)').matches) {
+  status.textContent = '터치 조작은 지원하지 않습니다. PC 브라우저(키보드·마우스) 또는 VR 헤드셋 브라우저에서 플레이하세요.';
+}
+
 void checkXR().then((ok) => {
   btnVR.disabled = !ok;
   vrHint.textContent = ok

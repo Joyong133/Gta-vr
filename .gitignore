@@ -1,7 +1,7 @@
-node_modules/
-dist/
-dist-artifact/
-test-results/
-tests/e2e/out/
 *.log
 .DS_Store
+dist-artifact/
+dist/
+node_modules/
+test-results/
+tests/e2e/out/
