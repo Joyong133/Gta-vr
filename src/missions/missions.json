@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "missions": [
+    {
+      "id": "m1_delivery",
+      "title": "네온 배송",
+      "description": "NEON 24 편의점 카운터에 맡겨진 소포를 받아 KAI RAMEN 뒷문 배송함까지 배달해. 손님이 기다리고 있어.",
+      "giver": "mika",
+      "start": { "requiresCompleted": [], "maxWanted": 0 },
+      "objectives": [
+        { "id": "go_store", "type": "reach_zone", "zone": "store_front", "text": "NEON 24 편의점으로 이동", "checkpoint": true },
+        {
+          "id": "take_pkg",
+          "type": "pickup_item",
+          "item": "package_m1",
+          "text": "카운터 위 소포 집기 (그립)",
+          "checkpoint": true,
+          "onStart": [{ "action": "spawn_item", "item": "package_m1" }]
+        },
+        { "id": "drive", "type": "enter_vehicle", "vehicle": "player_car", "text": "소포를 들고 차량 탑승" },
+        {
+          "id": "deliver",
+          "type": "deliver_item",
+          "item": "package_m1",
+          "socket": "kai_dropbox",
+          "text": "KAI RAMEN 배송함에 소포 넣기",
+          "onComplete": [{ "action": "toast", "text": "배송 완료! 고마워요~", "kind": "good" }]
+        }
+      ],
+      "success": { "type": "all_objectives" },
+      "fail": [{ "type": "busted" }],
+      "rewards": { "money": 250 },
+      "next": "m2_neon_run"
+    },
+    {
+      "id": "m2_neon_run",
+      "title": "네온 런",
+      "description": "도시 외곽 순환 코스를 제한 시간 안에 돌아. 체크포인트를 순서대로 통과해야 해.",
+      "giver": "mika",
+      "start": { "requiresCompleted": ["m1_delivery"], "maxWanted": 0 },
+      "objectives": [
+        { "id": "get_in", "type": "enter_vehicle", "vehicle": "player_car", "text": "차량에 탑승", "checkpoint": true },
+        {
+          "id": "race",
+          "type": "checkpoints",
+          "checkpoints": ["cp1", "cp2", "cp3", "cp4", "cp5", "cp6", "cp7", "cp8", "cp9"],
+          "text": "체크포인트 통과",
+          "checkpoint": true,
+          "onStart": [
+            { "action": "show_checkpoints", "ids": ["cp1", "cp2", "cp3", "cp4", "cp5", "cp6", "cp7", "cp8", "cp9"] },
+            { "action": "toast", "text": "출발! 150초 안에 완주", "kind": "info" }
+          ],
+          "onComplete": [{ "action": "hide_checkpoints" }]
+        }
+      ],
+      "success": { "type": "all_objectives" },
+      "fail": [{ "type": "time_limit", "seconds": 150, "objective": "race" }, { "type": "busted" }],
+      "rewards": { "money": 400 },
+      "next": "m3_hot_drive"
+    },
+    {
+      "id": "m3_hot_drive",
+      "title": "핫 드라이브",
+      "description": "압류 보관소 상자 위의 데이터 칩을 회수해. 경보가 울리면 경찰을 따돌리고 은신처 차고로 돌아와.",
+      "giver": "mika",
+      "start": { "requiresCompleted": ["m2_neon_run"], "maxWanted": 0 },
+      "objectives": [
+        { "id": "go_impound", "type": "reach_zone", "zone": "impound", "text": "압류 차량 보관소로 이동", "checkpoint": true },
+        {
+          "id": "take_chip",
+          "type": "pickup_item",
+          "item": "datachip_m3",
+          "text": "상자 위 데이터 칩 집기",
+          "checkpoint": true,
+          "onStart": [{ "action": "spawn_item", "item": "datachip_m3" }],
+          "onComplete": [
+            { "action": "set_wanted", "level": 2, "zone": "impound" },
+            { "action": "toast", "text": "경보 작동! 경찰이 출동한다", "kind": "bad" }
+          ]
+        },
+        { "id": "lose_cops", "type": "clear_wanted", "text": "경찰의 시야와 수색 범위를 벗어나기" },
+        {
+          "id": "reach_safehouse",
+          "type": "reach_zone",
+          "zone": "safehouse",
+          "text": "은신처 차고(GARAGE 13)로 복귀",
+          "onComplete": [{ "action": "despawn_item", "item": "datachip_m3" }]
+        }
+      ],
+      "success": { "type": "all_objectives" },
+      "fail": [{ "type": "busted" }],
+      "rewards": { "money": 800 },
+      "next": null
+    }
+  ]
+}

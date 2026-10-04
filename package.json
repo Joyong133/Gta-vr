@@ -1,0 +1,27 @@
+{
+  "name": "neon-district-vr",
+  "private": true,
+  "version": "0.1.0",
+  "description": "NEON DISTRICT VR - original WebXR open-world action vertical slice",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "smoke": "node tests/e2e/smoke.mjs"
+  },
+  "dependencies": {
+    "cannon-es": "0.20.0",
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "0.186.0",
+    "iwer": "2.5.0",
+    "playwright-core": "1.63.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.2",
+    "vitest": "5.0.3"
+  }
+}
