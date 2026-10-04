@@ -231,6 +231,20 @@ try {
   s = await state();
   check('police stand down after clearing', !s.police.some((p) => /respond|pursue|search/.test(p)), JSON.stringify(s.police));
 
+  console.log('G2. busted');
+  const moneyBefore = (await state()).money;
+  const officer = await ev(() => {
+    const o = window.neon.game.police.officers[0];
+    return [o.x, o.z];
+  });
+  await teleport(officer[0] + 1.2, officer[1], 0);
+  await ev(() => window.neon.setWanted(1));
+  await page.waitForFunction(() => window.neon.game.wanted.level === 0 && !window.neon.game.player.busy, null, { timeout: 90000 });
+  s = await state();
+  const precinct = await ev(() => window.neon.spawns.precinct);
+  check('officer next to an on-foot wanted player arrests them', Math.hypot(s.pos[0] - precinct.x, s.pos[1] - precinct.z) < 3, JSON.stringify(s.pos));
+  check('arrest costs a fine', s.money < moneyBefore, `${moneyBefore} -> ${s.money}`);
+
   console.log('H. weapon + crime witnesses');
   await teleport(-60, -40, 0);
   check('grab blaster via API', await ev(() => window.neon.grab('volt_pulse')));
@@ -294,12 +308,13 @@ try {
   console.log('K. save / reload / corruption');
   await ev(() => window.neon.setSetting('comfort.turnMode', 'smooth'));
   await ev(() => window.neon.setSetting('comfort.stance', 'seated'));
+  const moneySaved = (await state()).money;
   check('manual save', await ev(() => window.neon.save()));
   await load();
   const st1 = await ev(() => window.neon.start('desktop', false));
   await frames(5);
   s = await state();
-  check('reload restores progress', st1 === 'ok' && s.money === 350 && s.completed.includes('m1_delivery'), `${st1} ${JSON.stringify(s)}`);
+  check('reload restores progress', st1 === 'ok' && s.money === moneySaved && s.completed.includes('m1_delivery'), `${st1} ${moneySaved} ${JSON.stringify(s)}`);
   check('reload restores comfort settings', await ev(() => window.neon.game.settings.comfort.turnMode === 'smooth' && window.neon.game.settings.comfort.stance === 'seated'));
   await ev(() => window.neon.save());
   await ev(() => window.neon.corruptSave());

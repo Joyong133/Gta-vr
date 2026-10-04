@@ -28,6 +28,9 @@ export class TrafficCar {
   /** Debug: what is limiting speed right now. */
   reason = '';
   private overtakeObstacleSpeed = 0;
+  /** World position of the obstacle being overtaken (merge back once it is behind us). */
+  private overtakeX = 0;
+  private overtakeZ = 0;
 
   constructor(
     readonly car: AICar,
@@ -99,6 +102,8 @@ export class TrafficCar {
         if (this.blockedTime > t.blockedOvertakeTime && ahead.kind !== 'traffic' && this.lane.kind === 'road' && this.canOvertake(movers)) {
           this.targetOffset = -3.4;
           this.overtakeObstacleSpeed = ahead.speed;
+          this.overtakeX = ahead.x;
+          this.overtakeZ = ahead.z;
           this.blockedTime = 0;
         }
       } else {
@@ -107,9 +112,10 @@ export class TrafficCar {
     } else {
       this.blockedTime = Math.max(0, this.blockedTime - h);
       if (this.targetOffset !== 0 && this.overtakeObstacleSpeed < 1) {
-        // Obstacle passed (nothing ahead in the offset lane): merge back.
-        const back = this.probeBehindClear(movers);
-        if (back) this.targetOffset = 0;
+        // Merge back only once the obstacle is well behind us and our lane is clear.
+        toObbLocal(car.obb, this.overtakeX, this.overtakeZ, _loc);
+        const passed = -_loc.z < -6;
+        if (passed && this.probeBehindClear(movers)) this.targetOffset = 0;
       }
     }
     if (this.lane.kind === 'turn') this.targetOffset = 0;
@@ -139,9 +145,9 @@ export class TrafficCar {
   }
 
   /** Distance to the nearest thing in our path (straight probe). */
-  private probe(movers: Movers, maxDist: number): { dist: number; speed: number; kind: string } {
+  private probe(movers: Movers, maxDist: number): { dist: number; speed: number; kind: string; x: number; z: number } {
     const self = this.car;
-    let best = { dist: Infinity, speed: 0, kind: '' };
+    let best = { dist: Infinity, speed: 0, kind: '', x: 0, z: 0 };
     for (const c of movers.cars) {
       if (c.id === self.id) continue;
       toObbLocal(self.obb, c.obb.cx, c.obb.cz, _loc);
@@ -150,7 +156,7 @@ export class TrafficCar {
       if (Math.abs(_loc.x) > 1.9) continue;
       // Ignore cars driving the opposite way (head-on in their own lane is filtered by lateral).
       const dist = fwd - 4.5;
-      if (dist < best.dist) best = { dist: Math.max(0, dist), speed: c.speed, kind: c.kind === 'traffic' ? 'traffic' : c.kind };
+      if (dist < best.dist) best = { dist: Math.max(0, dist), speed: c.speed, kind: c.kind === 'traffic' ? 'traffic' : c.kind, x: c.obb.cx, z: c.obb.cz };
     }
     for (const w of movers.walkers) {
       toObbLocal(self.obb, w.x, w.z, _loc);
@@ -158,7 +164,7 @@ export class TrafficCar {
       if (fwd <= 0 || fwd > maxDist + 2.3) continue;
       if (Math.abs(_loc.x) > 1.25 + w.r) continue;
       const dist = fwd - 2.3 - w.r;
-      if (dist < best.dist) best = { dist: Math.max(0, dist), speed: 0, kind: 'walker' };
+      if (dist < best.dist) best = { dist: Math.max(0, dist), speed: 0, kind: 'walker', x: w.x, z: w.z };
     }
     return best;
   }

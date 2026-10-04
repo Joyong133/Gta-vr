@@ -147,8 +147,9 @@ export function buildCarModel(kind: CarKind, color: THREE.ColorRepresentation): 
     b.position.set(0.32, 0.97, 0.25);
     root.add(r, b);
     visual.lightbar = { red, blue };
-    const label = makeLabelTexture('NDPD', '#e9ebf2', '#1a2a6a', 256, 96);
-    for (const s of [-1, 1]) {
+    // Door decals need a 2D canvas; skipped in headless (Node) unit tests.
+    const label = typeof document !== 'undefined' ? makeLabelTexture('NDPD', '#e9ebf2', '#1a2a6a', 256, 96) : null;
+    for (const s of label ? [-1, 1] : []) {
       const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.32), new THREE.MeshBasicMaterial({ map: label }));
       plate.position.set(s * 0.94, 0.15, 0.1);
       plate.rotation.y = (s * Math.PI) / 2;

@@ -170,8 +170,9 @@ export class WristMenu {
         break;
       case 'map':
         this.minimap.draw(ctx, 24, y0, this.model.mapState(), this.time);
-        p.text('● 경찰  ■ 내 차  ◎ 목표  ! 미션', 650, y0 + 40, 26, UI_COLORS.dim);
-        p.text('붉은 원 = 경찰 수색 범위', 650, y0 + 80, 26, UI_COLORS.dim);
+        ['● 경찰 (가까운 순찰)', '■ 내 차', '◎ 현재 목표', '! MIKA 미션', '붉은 원 = 경찰 수색 범위', '흰 화살표 = 나'].forEach((l, i) =>
+          p.text(l, 650, y0 + 40 + i * 44, 28, UI_COLORS.dim),
+        );
         break;
       case 'comfort':
         this.drawComfort(buttons, y0);
