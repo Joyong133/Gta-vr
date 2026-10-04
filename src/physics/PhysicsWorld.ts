@@ -93,8 +93,12 @@ export class PhysicsWorld {
     return entry;
   }
 
+  /** Bodies repaired by the NaN guard (debug counter). */
+  repairedBodies = 0;
+
   step(dt: number): void {
     const t0 = performance.now();
+    this.guardNaN();
     // Clamp huge frame gaps (tab switches, XR session start) to avoid a spiral of death.
     const clamped = Math.min(dt, 0.1);
     this.world.step(this.fixedStep, clamped, 4);
@@ -106,6 +110,25 @@ export class PhysicsWorld {
       s.object.quaternion.set(b.interpolatedQuaternion.x, b.interpolatedQuaternion.y, b.interpolatedQuaternion.z, b.interpolatedQuaternion.w);
     }
     this.lastStepMs = performance.now() - t0;
+  }
+
+  /** Resets any body whose state became non-finite (defensive; should never trigger). */
+  private guardNaN(): void {
+    for (const b of this.world.bodies) {
+      const p = b.position;
+      const q = b.quaternion;
+      if (Number.isFinite(p.x + p.y + p.z + q.x + q.y + q.z + q.w + b.velocity.x + b.angularVelocity.x)) continue;
+      const pp = b.previousPosition;
+      b.position.set(Number.isFinite(pp.x) ? pp.x : 0, Number.isFinite(pp.y) ? Math.max(pp.y, 1) : 1, Number.isFinite(pp.z) ? pp.z : 0);
+      b.quaternion.set(0, 0, 0, 1);
+      b.velocity.setZero();
+      b.angularVelocity.setZero();
+      b.previousPosition.copy(b.position);
+      b.previousQuaternion.copy(b.quaternion);
+      b.interpolatedPosition.copy(b.position);
+      b.interpolatedQuaternion.copy(b.quaternion);
+      this.repairedBodies++;
+    }
   }
 
   /** Closest dynamic/kinematic body hit along a segment (projectiles, interaction checks). */

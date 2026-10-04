@@ -10,7 +10,9 @@
     "preview": "vite preview --host",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "smoke": "node tests/e2e/smoke.mjs"
+    "smoke": "node tests/e2e/smoke.mjs",
+    "smoke:xr": "node tests/e2e/xr.mjs",
+    "test:all": "npm run typecheck && npm test && npm run build && npm run smoke && npm run smoke:xr"
   },
   "dependencies": {
     "cannon-es": "0.20.0",

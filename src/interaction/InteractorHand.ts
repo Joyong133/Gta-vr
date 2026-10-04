@@ -162,12 +162,16 @@ export class InteractorHand {
     const b = (this.historyIndex - 1 + HISTORY) % HISTORY;
     const span = this.timeHistory[b] - this.timeHistory[a];
     if (span <= 1e-4) return out;
-    const dq = this.quatHistory[b].clone().multiply(this.quatHistory[a].clone().invert());
+    const dq = this.quatHistory[b].clone().multiply(this.quatHistory[a].clone().invert()).normalize();
     if (dq.w < 0) dq.set(-dq.x, -dq.y, -dq.z, -dq.w);
-    const angle = 2 * Math.acos(Math.min(1, dq.w));
-    const s = Math.sqrt(1 - dq.w * dq.w);
-    if (s < 1e-4) return out;
-    return out.set(dq.x / s, dq.y / s, dq.z / s).multiplyScalar(angle / span);
+    // Clamp: float error can push w slightly above 1, which would make sqrt() NaN.
+    const w = Math.min(1, Math.max(-1, dq.w));
+    const angle = 2 * Math.acos(w);
+    const s = Math.sqrt(Math.max(0, 1 - w * w));
+    if (!(s > 1e-4)) return out;
+    out.set(dq.x / s, dq.y / s, dq.z / s).multiplyScalar(angle / span);
+    if (!Number.isFinite(out.x + out.y + out.z)) out.set(0, 0, 0);
+    return out;
   }
 
   pulse(intensity: number, ms: number): void {

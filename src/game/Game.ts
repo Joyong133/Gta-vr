@@ -530,7 +530,31 @@ export class Game {
   // Frame
   // =====================================================================
 
+  /** Frame errors caught so far (shown on the debug overlay). */
+  frameErrors = 0;
+  private lastFrameError = '';
+
+  /**
+   * An exception inside the XR animation callback stops three.js from requesting
+   * the next frame (the headset view would freeze), so the frame body is guarded.
+   */
   private frame(timeMs: number, xrFrame?: XRFrame): void {
+    try {
+      this.frameBody(timeMs, xrFrame);
+    } catch (err) {
+      this.frameErrors++;
+      const msg = (err as Error)?.message ?? String(err);
+      if (msg !== this.lastFrameError || this.frameErrors % 300 === 1) console.error('[frame]', err);
+      this.lastFrameError = msg;
+      try {
+        this.renderer.render(this.scene, this.camera);
+      } catch {
+        /* keep the loop alive */
+      }
+    }
+  }
+
+  private frameBody(timeMs: number, xrFrame?: XRFrame): void {
     const t = timeMs / 1000;
     let dt = this.lastFrame ? t - this.lastFrame : 1 / 60;
     this.lastFrame = t;
@@ -1050,7 +1074,7 @@ export class Game {
       `fps ${p.fps.toFixed(0)}  frame ${p.frameMs.toFixed(1)}ms (max ${p.frameMsMax.toFixed(1)})  gpu ${p.gpuMs !== null ? p.gpuMs.toFixed(2) + 'ms' : (p.gpuTimerAvailable ? '...' : 'n/a')}`,
       `cpu ms: update ${p.sectionMs('update').toFixed(2)} | physics ${p.sectionMs('physics').toFixed(2)} | ai ${p.sectionMs('ai').toFixed(2)} | interact ${p.sectionMs('interaction').toFixed(2)} | ui ${p.sectionMs('ui').toFixed(2)} | render(submit) ${p.sectionMs('render').toFixed(2)}`,
       `draw calls ${info.render.calls}  tris ${(info.render.triangles / 1000).toFixed(0)}k  geo ${info.memory.geometries}  tex ${info.memory.textures}  bodies ${this.physics.world.bodies.length}`,
-      `player ${this.player.mode} pos ${_v.x.toFixed(1)},${_v.z.toFixed(1)}  busy=${this.player.busy}`,
+      `player ${this.player.mode} pos ${_v.x.toFixed(1)},${_v.z.toFixed(1)}  busy=${this.player.busy}  frameErrors=${this.frameErrors} nanRepairs=${this.physics.repairedBodies}`,
       `car speed ${this.vehicle.speedKmh.toFixed(0)}km/h up ${this.vehicle.physics.upY().toFixed(2)} flipped ${this.vehicle.physics.isFlipped} stuck ${this.vehicle.physics.isStuck} wheels ${this.vehicle.physics.vehicle.numWheelsOnGround}`,
       `WANTED ${w.level}  searching ${w.searching}  seen ${w.timeSinceSeen === Infinity ? '-' : w.timeSinceSeen.toFixed(1) + 's'}  cooldown ${(w.cooldownProgress * 100).toFixed(0)}%  LKP ${w.hasLkp ? w.lkpX.toFixed(0) + ',' + w.lkpZ.toFixed(0) : '-'} r=${w.searchRadius}`,
       `arrest ${(this.police.arrestProgress * 100).toFixed(0)}%  crimes: ${this.crimes.log.join(' / ')}`,

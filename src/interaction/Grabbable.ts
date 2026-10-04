@@ -185,8 +185,13 @@ export class Grabbable extends Interactable {
       const v = velocity.clone().multiplyScalar(tuning.player.throwVelocityScale);
       const max = tuning.player.maxThrowSpeed;
       if (v.length() > max) v.setLength(max);
+      const w = angular.clone();
+      if (w.length() > 25) w.setLength(25);
+      // Never hand non-finite values to the physics engine (a NaN pose breaks collision for every body).
+      if (!Number.isFinite(v.x + v.y + v.z)) v.set(0, 0, 0);
+      if (!Number.isFinite(w.x + w.y + w.z)) w.set(0, 0, 0);
       this.body.velocity.set(v.x, v.y, v.z);
-      this.body.angularVelocity.set(angular.x, angular.y, angular.z);
+      this.body.angularVelocity.set(w.x, w.y, w.z);
       this.body.wakeUp();
     }
     hand.pulse(0.15, 20);
