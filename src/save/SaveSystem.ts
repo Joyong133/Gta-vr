@@ -50,7 +50,7 @@ export class MemoryStorage implements KeyValueStorage {
   }
 }
 
-export const DEFAULT_SPAWN: [number, number, number] = [-52, 0, -24];
+export const DEFAULT_SPAWN: [number, number, number] = [-52, 0, -18];
 export const DEFAULT_YAW = 0;
 const WORLD_LIMIT = 146;
 

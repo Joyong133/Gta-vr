@@ -46,22 +46,24 @@ export function buildCarModel(kind: CarKind, color: THREE.ColorRepresentation): 
     body.box(-0.86, -0.12, 0.24, 0.12, 0.18, 2.0, paint); // driver sill under door
     body.box(0, -0.16, 0.24, 1.6, 0.1, 2.0, '#22232b'); // cabin floor
     body.box(0, 0.36, -0.79, 1.84, 0.06, 0.08, trim); // cowl
-    // Pillars + roof
+    // Open-top roadster: a low windshield frame and roll hoops only. No roof
+    // keeps the view wide and bright in VR (less claustrophobic, better comfort).
     for (const s of [-1, 1]) {
-      body.add(new THREE.BoxGeometry(0.07, 0.68, 0.09), s * 0.78, 0.66, -0.62, trim, 0, -0.55);
-      body.box(s * 0.8, 0.66, 0.42, 0.07, 0.56, 0.1, trim);
-      body.add(new THREE.BoxGeometry(0.07, 0.64, 0.09), s * 0.78, 0.64, 1.18, trim, 0, 0.6);
+      body.add(new THREE.BoxGeometry(0.045, 0.32, 0.06), s * 0.8, 0.52, -0.74, trim, 0, -0.7);
+      body.add(new THREE.TorusGeometry(0.22, 0.03, 6, 12, Math.PI), s * 0.38, 0.62, 0.86, '#c8ccd8');
     }
-    body.box(0, 0.95, 0.27, 1.6, 0.06, 1.66, paint);
+    // Low racing screen: its top edge stays below the driver's eye line.
+    body.add(new THREE.BoxGeometry(1.62, 0.035, 0.05), 0, 0.64, -0.64, trim, 0, -0.7);
     // Interior
-    body.box(0, 0.47, -0.62, 1.68, 0.22, 0.36, '#1b1c24'); // dashboard
-    body.box(0, 0.28, -0.4, 0.26, 0.36, 0.6, '#202129'); // centre console
+    body.box(0, 0.47, -0.62, 1.68, 0.22, 0.36, '#2a2c38'); // dashboard
+    body.box(0, 0.585, -0.62, 1.66, 0.012, 0.3, '#3a3d4c'); // dash top
+    body.box(0, 0.28, -0.4, 0.26, 0.36, 0.6, '#2c2e3a'); // centre console
     for (const sx of [-0.38, 0.38]) {
-      body.box(sx, 0.03, 0.3, 0.52, 0.14, 0.52, '#3b2f45');
-      body.add(new THREE.BoxGeometry(0.52, 0.66, 0.12), sx, 0.4, 0.62, '#3b2f45', 0, -0.18);
-      body.box(sx, 0.8, 0.7, 0.28, 0.16, 0.1, '#3b2f45'); // headrest
+      body.box(sx, 0.03, 0.3, 0.52, 0.14, 0.52, '#6a4f86');
+      body.add(new THREE.BoxGeometry(0.52, 0.66, 0.12), sx, 0.4, 0.62, '#6a4f86', 0, -0.18);
+      body.box(sx, 0.8, 0.7, 0.28, 0.16, 0.1, '#6a4f86'); // headrest
     }
-    body.box(0, 0.25, 1.05, 1.6, 0.5, 0.4, '#30283a'); // rear bench
+    body.box(0, 0.12, 1.05, 1.6, 0.25, 0.4, '#3a3048'); // rear deck
   } else {
     body.box(0, 0.09, 0, 1.84, 0.6, 4.36, paint);
     body.box(0, 0.62, 0.22, 1.58, 0.48, 2.1, glassCol); // greenhouse (dark glass)
@@ -236,4 +238,16 @@ function buildPlayerExtras(v: CarVisual, paint: THREE.Color): void {
   arrow.position.set(-0.38, 0.62, -0.62);
   v.root.add(arrow);
   v.gpsArrow = arrow;
+
+  // Ambient light strip along the dash + faint windshield.
+  const strip = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.012, 0.012), new THREE.MeshBasicMaterial({ color: 0x3df5ff, toneMapped: false }));
+  strip.position.set(0, 0.36, -0.44);
+  v.root.add(strip);
+  const glass = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.56, 0.3),
+    new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.07, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  glass.position.set(0, 0.52, -0.72);
+  glass.rotation.x = -0.7;
+  v.root.add(glass);
 }

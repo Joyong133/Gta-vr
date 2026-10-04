@@ -181,12 +181,13 @@ export class Landmarks {
 
     // Interior
     const inner = new QuadBatch();
-    inner.innerWalls(S.minX + t, S.minZ + t, S.maxX - t, S.maxZ - t, 0, S.height, 2.5, new THREE.Color('#f2eee6'));
-    const innerMesh = new THREE.Mesh(inner.build(), new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.FrontSide }));
+    inner.innerWalls(S.minX + t, S.minZ + t, S.maxX - t, S.maxZ - t, 0, S.height, 2.5, new THREE.Color('#fff0d6'));
+    // Interiors get a warm emissive base: the hemisphere sky light is not occluded indoors.
+    const innerMesh = new THREE.Mesh(inner.build(), new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.FrontSide, emissive: 0x4a3b28 }));
     this.group.add(innerMesh);
     const floor = new QuadBatch();
     floor.floor(S.minX + t, S.minZ + t, S.maxX - t, S.maxZ - t, 0.035, 1.2, new THREE.Color('#ffffff'));
-    const floorMesh = new THREE.Mesh(floor.build(), new THREE.MeshLambertMaterial({ map: makeTileFloorTexture(), vertexColors: true }));
+    const floorMesh = new THREE.Mesh(floor.build(), new THREE.MeshLambertMaterial({ map: makeTileFloorTexture(), vertexColors: true, color: 0xfff2dc, emissive: 0x3a3020 }));
     floorMesh.receiveShadow = true;
     this.group.add(floorMesh);
     // Ceiling (faces down) + light panels
@@ -226,7 +227,7 @@ export class Landmarks {
     }
     fx.box(52, 1.1, S.minZ + t + 0.35, 12, 2.2, 0.7, '#20232e');
     solid(46, 0, S.minZ + t, 58, 2.2, S.minZ + t + 0.7, { sight: false, cars: false });
-    this.group.add(new THREE.Mesh(fx.build(), new THREE.MeshLambertMaterial({ vertexColors: true })));
+    this.group.add(new THREE.Mesh(fx.build(), new THREE.MeshLambertMaterial({ vertexColors: true, emissive: 0x1a1612 })));
     const cooler = new THREE.Mesh(new THREE.PlaneGeometry(11.6, 1.9), new THREE.MeshBasicMaterial({ color: 0xbfe9ff, toneMapped: false, transparent: true, opacity: 0.85 }));
     cooler.position.set(52, 1.15, S.minZ + t + 0.71);
     this.group.add(cooler);

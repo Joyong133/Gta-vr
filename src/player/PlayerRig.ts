@@ -55,6 +55,11 @@ export class PlayerRig {
     }
   }
 
+  /** Recomputes world matrices after the rig was moved directly. */
+  syncHeadMatrices(): void {
+    this.rig.updateMatrixWorld(true);
+  }
+
   /** Desktop mouse look: yaw rotates the rig around the head, pitch tilts the camera. */
   applyDesktopLook(dYaw: number, dPitch: number): void {
     if (dYaw !== 0) this.rotateAroundHead(-dYaw);

@@ -60,7 +60,7 @@ export const BLOCKS = {
 
 export const BUILDINGS: BuildingDef[] = [
   // ---- NW block (plaza)
-  { minX: -100, minZ: -100, maxX: -78, maxZ: -70, height: 38, style: 'tower', sign: { text: 'HOTEL ORBIT', color: '#7af7ff', face: 's', y: 30, width: 4, vertical: true } },
+  { minX: -100, minZ: -100, maxX: -78, maxZ: -70, height: 38, style: 'tower', sign: { text: 'HOTEL ORBIT', color: '#7af7ff', face: 's', y: 25, width: 2.2, vertical: true } },
   { minX: -76, minZ: -100, maxX: -56, maxZ: -74, height: 22, style: 'mid', sign: { text: 'CYBER CAFE', color: '#41ff9d', face: 's', y: 9, width: 10 } },
   { minX: -54, minZ: -100, maxX: -36, maxZ: -70, height: 28, style: 'mid' },
   { minX: -34, minZ: -100, maxX: -10, maxZ: -76, height: 18, style: 'mid', sign: { text: 'NOODLE BAR', sub: '국수', color: '#ffb347', face: 'e', y: 6, width: 9 } },
@@ -174,7 +174,7 @@ export const ITEM_SPAWNS: Record<string, { x: number; y: number; z: number }> = 
 
 /** Sockets (drop targets) referenced by mission data. */
 export const SOCKETS: Record<string, { x: number; y: number; z: number; r: number; label: string }> = {
-  kai_dropbox: { x: -100.7, y: 0.95, z: 62, r: 0.6, label: 'KAI RAMEN 배송함' },
+  kai_dropbox: { x: -100.7, y: 0.95, z: 62, r: 0.75, label: 'KAI RAMEN 배송함' },
 };
 
 /** Pedestrian walking loops (sidewalk centre lines + plaza). */
