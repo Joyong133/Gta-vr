@@ -46,6 +46,10 @@ export class VehiclePhysics {
   flippedTime = 0;
   /** Seconds the driver has been pushing throttle without moving. */
   stuckTime = 0;
+  /**
+   * false = parked (no driver): controls are ignored, the wheels straighten and
+   * the brakes hold the car. Unlike controls.brake this never turns into reverse.
+   */
   enabled = true;
   private readonly t = tuning.vehicle;
 

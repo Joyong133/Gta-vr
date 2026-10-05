@@ -9,6 +9,8 @@ export interface MenuModel {
   money(): number;
   wanted(): { level: number; searching: boolean; cooldown: number };
   mission(): { title: string; objective: string; timeLeft: number | null; progress: string | null } | null;
+  /** No active mission, but the last one failed and can be restarted from here. */
+  canRestartFailed(): boolean;
   settings(): Settings;
   changeSettings(mutate: (s: Settings) => void): void;
   mapState(): MapState;
@@ -211,6 +213,7 @@ export class WristMenu {
     } else {
       p.text('진행 중인 미션 없음', 40, y, 38, UI_COLORS.dim);
       p.wrap('디스패치 광장의 MIKA(주황색 재킷, 머리 위 !)에게 가서 A/E로 말을 걸어 미션을 받으세요.', 40, y + 50, 940, 30, UI_COLORS.dim);
+      if (m.canRestartFailed()) buttons.push({ id: 'act:restart_mission', x: 40, y: 600, w: 300, h: 88, label: '실패한 미션 재시작' });
     }
     buttons.push({ id: 'act:call_car', x: 684, y: 600, w: 300, h: 88, label: '내 차 호출' });
     buttons.push({ id: 'act:save', x: 40, y: 710, w: 300, h: 88, label: '저장', style: 'primary' });

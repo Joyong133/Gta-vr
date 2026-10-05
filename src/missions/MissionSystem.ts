@@ -209,16 +209,18 @@ export class MissionSystem {
     this.completing = false;
   }
 
-  fail(reason: string): void {
+  /** Ends the active mission. A restartable failure is remembered for restart() (wrist menu). */
+  fail(reason: string, restartable = true): void {
     const a = this.active;
     if (!a) return;
     this.active = null;
-    this.lastFailure = { id: a.def.id, reason };
+    this.lastFailure = restartable ? { id: a.def.id, reason } : null;
     this.hooks.onFailed?.(a.def, reason);
   }
 
+  /** Giving up is not offered as "restart failed mission" (MIKA re-offers it). */
   abandon(): void {
-    this.fail('포기함');
+    this.fail('포기함', false);
   }
 
   /** Restart the active (or last failed) mission from its first objective. */
@@ -288,7 +290,8 @@ export class MissionSystem {
   isObjectiveMet(o: ObjectiveDef, ctx: MissionContext): boolean {
     switch (o.type) {
       case 'reach_zone':
-        return !!o.zone && ctx.inZone(o.zone);
+        // Optional item: the zone only counts while the player carries it.
+        return !!o.zone && ctx.inZone(o.zone) && (!o.item || ctx.itemCollected(o.item));
       case 'pickup_item':
         return !!o.item && ctx.itemCollected(o.item);
       case 'deliver_item':

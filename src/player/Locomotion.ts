@@ -13,6 +13,8 @@ const _head = new THREE.Vector3();
 const _origin = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _push = { x: 0, z: 0 };
+const _target = { x: 0, z: 0 };
+const _probe = { x: 0, z: 0 };
 
 export interface LocomotionContext {
   /** Moving obstacles the player cannot walk through (parked car, AI cars, closed doors). */
@@ -93,7 +95,9 @@ export class Locomotion {
       // forward = (-sin, -cos), right = (cos, -sin)
       const vx = (-sin * my + cos * mx) * speed;
       const vz = (-cos * my - sin * mx) * speed;
-      const target = { x: _head.x + vx * dt, z: _head.z + vz * dt };
+      const target = _target;
+      target.x = _head.x + vx * dt;
+      target.z = _head.z + vz * dt;
       this.resolve(target, _head.y - this.rig.rig.position.y);
       this.rig.translate(target.x - _head.x, target.z - _head.z);
       this.speed = Math.hypot(target.x - _head.x, target.z - _head.z) / Math.max(dt, 1e-4);
@@ -134,7 +138,9 @@ export class Locomotion {
     this.lastHead.copy(_head);
 
     // --- Head-in-wall darkening (physical leaning into geometry)
-    const probe = { x: _head.x, z: _head.z };
+    const probe = _probe;
+    probe.x = _head.x;
+    probe.z = _head.z;
     const radius = 0.12;
     let depth = 0;
     if (this.world.isCircleBlocked(probe.x, probe.z, radius, this.rig.rig.position.y)) {

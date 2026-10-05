@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { COL } from '../config/layers';
 import type { Grabbable } from './Grabbable';
 
+const _scale = new THREE.Vector3();
+
 /**
  * A snap point for grabbables: delivery boxes, the car's passenger seat...
  * Released items within `radius` that pass `accepts` snap in and then follow
@@ -61,7 +63,7 @@ export class Socket {
     const item = this.item;
     if (!item) return;
     this.anchor.updateWorldMatrix(true, false);
-    this.anchor.matrixWorld.decompose(item.object.position, item.object.quaternion, new THREE.Vector3());
+    this.anchor.matrixWorld.decompose(item.object.position, item.object.quaternion, _scale);
     item.object.updateMatrixWorld(true);
     item.copyToBody();
   }

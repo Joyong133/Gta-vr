@@ -45,7 +45,6 @@
           "type": "checkpoints",
           "checkpoints": ["cp1", "cp2", "cp3", "cp4", "cp5", "cp6", "cp7", "cp8", "cp9"],
           "text": "체크포인트 통과",
-          "checkpoint": true,
           "onStart": [
             { "action": "show_checkpoints", "ids": ["cp1", "cp2", "cp3", "cp4", "cp5", "cp6", "cp7", "cp8", "cp9"] },
             { "action": "toast", "text": "출발! 150초 안에 완주", "kind": "info" }
@@ -83,7 +82,8 @@
           "id": "reach_safehouse",
           "type": "reach_zone",
           "zone": "safehouse",
-          "text": "은신처 차고(GARAGE 13)로 복귀",
+          "item": "datachip_m3",
+          "text": "데이터 칩을 가지고 은신처 차고(GARAGE 13)로 복귀",
           "onComplete": [{ "action": "despawn_item", "item": "datachip_m3" }]
         }
       ],

@@ -19,6 +19,11 @@ const _pos = new THREE.Vector3();
 const _e = new THREE.Euler();
 const _v = new THREE.Vector3();
 const _tmp = { x: 0, z: 0 };
+/**
+ * Chassis height for recovery resets: just above wheel contact (rest height is
+ * ~0.415, wheels touch below 0.48) so the car settles instead of dropping.
+ */
+export const RECOVER_Y = 0.45;
 
 export interface ImpactInfo {
   speed: number;
@@ -42,6 +47,8 @@ export class PlayerVehicle {
   readonly obb: Obb2 = { cx: 0, cz: 0, yaw: 0, halfW: 0.95, halfL: 2.25 };
   onImpact?: (info: ImpactInfo) => void;
   private impactCooldown = 0;
+  /** Visual wheel roll angle (rad about the axle), driven by forward speed. */
+  private wheelSpinAngle = 0;
   /** Smoothed yaw (rad) used for the horizon-locked seat. */
   readonly seatAnchor = new THREE.Object3D();
 
@@ -52,6 +59,8 @@ export class PlayerVehicle {
     private readonly roads: RoadNetwork,
   ) {
     this.physics = new VehiclePhysics(phys.world);
+    // Nobody is in the car yet: parked until the player gets in.
+    this.physics.enabled = false;
     bodyTags.set(this.physics.chassis, { kind: 'player_car', id: this.id });
     this.visual = buildCarModel('player', 0x1fb6c9);
     scene.add(this.visual.root);
@@ -126,18 +135,22 @@ export class PlayerVehicle {
     this.updateObb();
   }
 
-  private syncVisual(_dt: number): void {
+  private syncVisual(dt: number): void {
     const b = this.physics.chassis;
     const root = this.visual.root;
     root.position.set(b.interpolatedPosition.x, b.interpolatedPosition.y, b.interpolatedPosition.z);
     root.quaternion.set(b.interpolatedQuaternion.x, b.interpolatedQuaternion.y, b.interpolatedQuaternion.z, b.interpolatedQuaternion.w);
+    // Roll from the car's own speed: cannon's wheelInfo.rotation has the opposite
+    // sign for this axis setup and freezes whenever a brake is applied (coasting).
+    this.wheelSpinAngle = (this.wheelSpinAngle - (this.physics.forwardSpeed / WHEEL_LAYOUT.radius) * dt) % (Math.PI * 2);
     const infos = this.physics.vehicle.wheelInfos;
     for (let i = 0; i < 4; i++) {
       const w = infos[i];
       const pivot = this.visual.wheels[i];
       pivot.position.y = WHEEL_LAYOUT.connectionY - w.suspensionLength;
       pivot.rotation.y = w.steering;
-      this.visual.wheelSpins[i].rotation.x = w.rotation;
+      // Negative about +X = top of the wheel moving toward -Z = rolling forward.
+      this.visual.wheelSpins[i].rotation.x = this.wheelSpinAngle;
     }
     root.updateMatrixWorld(true);
   }
@@ -153,7 +166,10 @@ export class PlayerVehicle {
   seatPose(horizonLock: boolean, outPos: THREE.Vector3, outQuat: THREE.Quaternion): void {
     this.seatAnchor.getWorldPosition(outPos);
     if (horizonLock) {
-      _e.set(0, this.physics.yaw(), 0, 'YXZ');
+      // Yaw of the interpolated pose the cabin is drawn with (physics.yaw() is the
+      // latest fixed step, which judders against the cabin at 72/90/120 Hz).
+      _v.set(0, 0, -1).applyQuaternion(this.visual.root.quaternion);
+      _e.set(0, Math.atan2(-_v.x, -_v.z), 0, 'YXZ');
       outQuat.setFromEuler(_e);
       // Use the yaw-only frame for the eye offset too so pitch never shifts the head.
       const root = this.visual.root;
@@ -211,13 +227,13 @@ export class PlayerVehicle {
       const obb: Obb2 = { cx: pos.x, cz: pos.z, yaw, halfW: 1.0, halfL: 2.4 };
       if (this.world.isObbBlocked(obb)) continue;
       if (otherObbs.some((o) => obbVsObb(obb, o, _tmp))) continue;
-      this.physics.reset(pos.x, 0.8, pos.z, yaw);
+      this.physics.reset(pos.x, RECOVER_Y, pos.z, yaw);
       this.syncVisual(0);
       this.updateObb();
       return;
     }
     this.roads.sample(lane, np.s, pos, dir);
-    this.physics.reset(pos.x, 1.2, pos.z, Math.atan2(-dir.x, -dir.z));
+    this.physics.reset(pos.x, RECOVER_Y, pos.z, Math.atan2(-dir.x, -dir.z));
     this.syncVisual(0);
     this.updateObb();
   }

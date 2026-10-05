@@ -39,6 +39,8 @@ export interface StaticBoxOptions {
 
 const WALK_MIN_Y = 0.35; // anything lower than this is stepped over
 const WALK_MAX_Y = 1.9; // anything starting above this is walked under
+/** isCorridorBlocked queries the grid in pieces this long, so a long diagonal never scans a huge rectangle. */
+const CORRIDOR_PIECE = 16;
 
 export class StaticWorld {
   readonly boxes: StaticBox[] = [];
@@ -68,8 +70,10 @@ export class StaticWorld {
     };
     this.boxes.push(box);
     this.stamps.push(0);
-    const [c0x, c0z] = this.cellOf(box.minX, box.minZ);
-    const [c1x, c1z] = this.cellOf(box.maxX, box.maxZ);
+    const c0x = this.cellIndex(box.minX);
+    const c0z = this.cellIndex(box.minZ);
+    const c1x = this.cellIndex(box.maxX);
+    const c1z = this.cellIndex(box.maxZ);
     for (let cx = c0x; cx <= c1x; cx++) {
       for (let cz = c0z; cz <= c1z; cz++) {
         const key = this.key(cx, cz);
@@ -86,8 +90,9 @@ export class StaticWorld {
     return this.add(cx - sx / 2, cy - sy / 2, cz - sz / 2, cx + sx / 2, cy + sy / 2, cz + sz / 2, opts);
   }
 
-  private cellOf(x: number, z: number): [number, number] {
-    return [Math.floor((x + this.halfExtent) / this.cellSize), Math.floor((z + this.halfExtent) / this.cellSize)];
+  /** Grid cell index of a world coordinate (same for X and Z). */
+  private cellIndex(v: number): number {
+    return Math.floor((v + this.halfExtent) / this.cellSize);
   }
 
   private key(cx: number, cz: number): number {
@@ -98,8 +103,10 @@ export class StaticWorld {
   query(minX: number, minZ: number, maxX: number, maxZ: number, out: StaticBox[]): StaticBox[] {
     out.length = 0;
     const s = ++this.stamp;
-    const [c0x, c0z] = this.cellOf(minX, minZ);
-    const [c1x, c1z] = this.cellOf(maxX, maxZ);
+    const c0x = this.cellIndex(minX);
+    const c0z = this.cellIndex(minZ);
+    const c1x = this.cellIndex(maxX);
+    const c1z = this.cellIndex(maxZ);
     for (let cx = c0x; cx <= c1x; cx++) {
       for (let cz = c0z; cz <= c1z; cz++) {
         const list = this.cells.get(this.key(cx, cz));
@@ -203,7 +210,8 @@ export class StaticWorld {
     let bestT = maxDist;
     // Amanatides-Woo traversal over the XZ grid.
     const cs = this.cellSize;
-    let [cx, cz] = this.cellOf(ox, oz);
+    let cx = this.cellIndex(ox);
+    let cz = this.cellIndex(oz);
     const stepX = dx > 0 ? 1 : -1;
     const stepZ = dz > 0 ? 1 : -1;
     const nextBoundX = (cx + (stepX > 0 ? 1 : 0)) * cs - this.halfExtent;
@@ -256,6 +264,35 @@ export class StaticWorld {
     return hit !== null;
   }
 
+  /**
+   * True when a box accepted by `filter` comes within `halfWidth` of the XZ segment (x0,z0)-(x1,z1):
+   * a swept car-width corridor. Unlike a few parallel rays it cannot slip past a thin pole.
+   * Box corners count as square (slightly conservative).
+   */
+  isCorridorBlocked(x0: number, z0: number, x1: number, z1: number, halfWidth: number, filter?: (b: StaticBox) => boolean): boolean {
+    const dx = x1 - x0;
+    const dz = z1 - z0;
+    const pieces = Math.max(1, Math.ceil(Math.hypot(dx, dz) / CORRIDOR_PIECE));
+    for (let i = 0; i < pieces; i++) {
+      const ax = x0 + (dx * i) / pieces;
+      const az = z0 + (dz * i) / pieces;
+      const bx = x0 + (dx * (i + 1)) / pieces;
+      const bz = z0 + (dz * (i + 1)) / pieces;
+      const list = this.query(
+        Math.min(ax, bx) - halfWidth,
+        Math.min(az, bz) - halfWidth,
+        Math.max(ax, bx) + halfWidth,
+        Math.max(az, bz) + halfWidth,
+        this.queryBuf,
+      );
+      for (const b of list) {
+        if (filter && !filter(b)) continue;
+        if (segmentHitsRect(x0, z0, dx, dz, b.minX - halfWidth, b.minZ - halfWidth, b.maxX + halfWidth, b.maxZ + halfWidth)) return true;
+      }
+    }
+    return false;
+  }
+
   /** True if the point is inside any box (used to validate teleports / item drops). */
   isPointInside(x: number, y: number, z: number, margin = 0): boolean {
     const list = this.query(x - margin, z - margin, x + margin, z + margin, this.queryBuf);
@@ -274,6 +311,49 @@ function box3Tall(minY: number, maxY: number): boolean {
 
 const sightFilter = (b: StaticBox): boolean => b.blocksSight;
 
+/** Does the segment p + t*d, t in [0,1], touch the XZ rectangle? (2D slab test) */
+function segmentHitsRect(px: number, pz: number, dx: number, dz: number, minX: number, minZ: number, maxX: number, maxZ: number): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  if (Math.abs(dx) < 1e-9) {
+    if (px < minX || px > maxX) return false;
+  } else {
+    let a = (minX - px) / dx;
+    let b = (maxX - px) / dx;
+    if (a > b) {
+      const t = a;
+      a = b;
+      b = t;
+    }
+    if (a > t0) t0 = a;
+    if (b < t1) t1 = b;
+    if (t0 > t1) return false;
+  }
+  if (Math.abs(dz) < 1e-9) {
+    if (pz < minZ || pz > maxZ) return false;
+  } else {
+    let a = (minZ - pz) / dz;
+    let b = (maxZ - pz) / dz;
+    if (a > b) {
+      const t = a;
+      a = b;
+      b = t;
+    }
+    if (a > t0) t0 = a;
+    if (b < t1) t1 = b;
+    if (t0 > t1) return false;
+  }
+  return true;
+}
+
+/** Scratch slab inputs for rayAabb (x, y, z), so the hot ray path allocates nothing per box. */
+const _ro = new Float64Array(3);
+const _rd = new Float64Array(3);
+const _rlo = new Float64Array(3);
+const _rhi = new Float64Array(3);
+/** Reused rayAabb result: only valid until the next call (raycast copies what it keeps). */
+const _rayRes = { t: 0, nx: 0, ny: 0, nz: 0 };
+
 function rayAabb(
   ox: number,
   oy: number,
@@ -288,13 +368,23 @@ function rayAabb(
   let nx = 0;
   let ny = 0;
   let nz = 0;
-  const axes: [number, number, number, number][] = [
-    [ox, dx, b.minX, b.maxX],
-    [oy, dy, b.minY, b.maxY],
-    [oz, dz, b.minZ, b.maxZ],
-  ];
+  _ro[0] = ox;
+  _ro[1] = oy;
+  _ro[2] = oz;
+  _rd[0] = dx;
+  _rd[1] = dy;
+  _rd[2] = dz;
+  _rlo[0] = b.minX;
+  _rlo[1] = b.minY;
+  _rlo[2] = b.minZ;
+  _rhi[0] = b.maxX;
+  _rhi[1] = b.maxY;
+  _rhi[2] = b.maxZ;
   for (let i = 0; i < 3; i++) {
-    const [o, d, lo, hi] = axes[i];
+    const o = _ro[i];
+    const d = _rd[i];
+    const lo = _rlo[i];
+    const hi = _rhi[i];
     if (Math.abs(d) < 1e-9) {
       if (o < lo || o > hi) return null;
       continue;
@@ -318,6 +408,10 @@ function rayAabb(
     if (tmin > tmax) return null;
   }
   if (tmax < 0) return null;
-  if (tmin < 0) return { t: 0, nx: 0, ny: 0, nz: 0 }; // origin inside box
-  return { t: tmin, nx, ny, nz };
+  const inside = tmin < 0; // origin inside box
+  _rayRes.t = inside ? 0 : tmin;
+  _rayRes.nx = inside ? 0 : nx;
+  _rayRes.ny = inside ? 0 : ny;
+  _rayRes.nz = inside ? 0 : nz;
+  return _rayRes;
 }

@@ -14,6 +14,8 @@ const STOP_BACK = 3.8; // stop this far before the end of the lane (stop line)
 const _loc = { x: 0, z: 0 };
 const _pos = { x: 0, z: 0 };
 const _dir = { x: 0, z: 0 };
+/** Reused result of TrafficCar.probe (read immediately by the caller). */
+const _ahead = { dist: Infinity, speed: 0, kind: '', x: 0, z: 0 };
 
 /** Lane-following civilian car with a tiny state machine. */
 export class TrafficCar {
@@ -31,6 +33,10 @@ export class TrafficCar {
   /** World position of the obstacle being overtaken (merge back once it is behind us). */
   private overtakeX = 0;
   private overtakeZ = 0;
+  /** Collision knock kept as an offset from the lane pose (advance() resamples the lane every step). */
+  private knockOffX = 0;
+  private knockOffZ = 0;
+  private knockOffYaw = 0;
 
   constructor(
     readonly car: AICar,
@@ -130,6 +136,21 @@ export class TrafficCar {
 
   private advance(h: number, roads: RoadNetwork): void {
     const car = this.car;
+    // Persist the collision knock as an offset from the lane pose; ease back once driving again.
+    this.knockOffX += car.knockX * h;
+    this.knockOffZ += car.knockZ * h;
+    this.knockOffYaw += car.knockYaw * h;
+    if (this.state !== 'stunned' && (this.knockOffX !== 0 || this.knockOffZ !== 0 || this.knockOffYaw !== 0)) {
+      const f = Math.exp(-1.5 * h);
+      this.knockOffX *= f;
+      this.knockOffZ *= f;
+      this.knockOffYaw *= f;
+      if (Math.abs(this.knockOffX) + Math.abs(this.knockOffZ) < 1e-3 && Math.abs(this.knockOffYaw) < 1e-3) {
+        this.knockOffX = 0;
+        this.knockOffZ = 0;
+        this.knockOffYaw = 0;
+      }
+    }
     this.s += car.speed * h;
     while (this.s > this.lane.length) {
       this.s -= this.lane.length;
@@ -139,15 +160,20 @@ export class TrafficCar {
     }
     roads.sample(this.lane, this.s, _pos, _dir);
     // Right normal of the travel direction: (-dz, dx)
-    car.x = _pos.x + -_dir.z * this.offset;
-    car.z = _pos.z + _dir.x * this.offset;
-    car.yaw = Math.atan2(-_dir.x, -_dir.z);
+    car.x = _pos.x + -_dir.z * this.offset + this.knockOffX;
+    car.z = _pos.z + _dir.x * this.offset + this.knockOffZ;
+    car.yaw = Math.atan2(-_dir.x, -_dir.z) + this.knockOffYaw;
   }
 
   /** Distance to the nearest thing in our path (straight probe). */
   private probe(movers: Movers, maxDist: number): { dist: number; speed: number; kind: string; x: number; z: number } {
     const self = this.car;
-    let best = { dist: Infinity, speed: 0, kind: '', x: 0, z: 0 };
+    const best = _ahead;
+    best.dist = Infinity;
+    best.speed = 0;
+    best.kind = '';
+    best.x = 0;
+    best.z = 0;
     for (const c of movers.cars) {
       if (c.id === self.id) continue;
       toObbLocal(self.obb, c.obb.cx, c.obb.cz, _loc);
@@ -156,7 +182,13 @@ export class TrafficCar {
       if (Math.abs(_loc.x) > 1.9) continue;
       // Ignore cars driving the opposite way (head-on in their own lane is filtered by lateral).
       const dist = fwd - 4.5;
-      if (dist < best.dist) best = { dist: Math.max(0, dist), speed: c.speed, kind: c.kind === 'traffic' ? 'traffic' : c.kind, x: c.obb.cx, z: c.obb.cz };
+      if (dist < best.dist) {
+        best.dist = Math.max(0, dist);
+        best.speed = c.speed;
+        best.kind = c.kind;
+        best.x = c.obb.cx;
+        best.z = c.obb.cz;
+      }
     }
     for (const w of movers.walkers) {
       toObbLocal(self.obb, w.x, w.z, _loc);
@@ -164,7 +196,13 @@ export class TrafficCar {
       if (fwd <= 0 || fwd > maxDist + 2.3) continue;
       if (Math.abs(_loc.x) > 1.25 + w.r) continue;
       const dist = fwd - 2.3 - w.r;
-      if (dist < best.dist) best = { dist: Math.max(0, dist), speed: 0, kind: 'walker', x: w.x, z: w.z };
+      if (dist < best.dist) {
+        best.dist = Math.max(0, dist);
+        best.speed = 0;
+        best.kind = 'walker';
+        best.x = w.x;
+        best.z = w.z;
+      }
     }
     return best;
   }
@@ -262,7 +300,7 @@ export class TrafficManager {
   }
 
   publish(): void {
-    for (const c of this.cars) this.movers.cars.push({ id: c.car.id, kind: 'traffic', obb: c.car.obb, speed: c.car.speed });
+    for (const c of this.cars) this.movers.addCar(c.car.id, 'traffic', c.car.obb, c.car.speed);
   }
 
   byId(id: string): TrafficCar | undefined {

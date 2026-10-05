@@ -17,6 +17,12 @@ export interface Obb2 {
   halfL: number; // along local Z
 }
 
+/** Scratch for circleVsObb (hot path: no per-call allocation). */
+const _cTmp: Vec2Like = { x: 0, z: 0 };
+/** Scratch separating axes for the OBB SAT tests. */
+const _ax = new Float64Array(4);
+const _az = new Float64Array(4);
+
 /** Circle vs axis-aligned rectangle. Returns penetration push (written to out) or false. */
 export function circleVsAabb(
   px: number,
@@ -67,7 +73,7 @@ export function circleVsObb(px: number, pz: number, r: number, b: Obb2, out: Vec
   const dz = pz - b.cz;
   const lx = c * dx - s * dz;
   const lz = s * dx + c * dz;
-  const tmp = { x: 0, z: 0 };
+  const tmp = _cTmp;
   if (!circleVsAabb(lx, lz, r, -b.halfW, -b.halfL, b.halfW, b.halfL, tmp)) return false;
   // Local -> world (rotation by +yaw).
   out.x = c * tmp.x + s * tmp.z;
@@ -83,9 +89,9 @@ export function obbAxes(b: Obb2): { rx: number; rz: number; fx: number; fz: numb
   return { rx: c, rz: -s, fx: -s, fz: -c };
 }
 
-function projectObb(b: Obb2, ax: number, az: number): number {
-  const a = obbAxes(b);
-  return b.halfW * Math.abs(a.rx * ax + a.rz * az) + b.halfL * Math.abs(a.fx * ax + a.fz * az);
+/** Half extent of an OBB (axes right = (c, -s), forward = (-s, -c)) projected on unit axis (ax, az). */
+function projectObb(halfW: number, halfL: number, c: number, s: number, ax: number, az: number): number {
+  return halfW * Math.abs(c * ax - s * az) + halfL * Math.abs(s * ax + c * az);
 }
 
 /**
@@ -97,21 +103,27 @@ export function obbVsAabb(b: Obb2, minX: number, minZ: number, maxX: number, max
   const acz = (minZ + maxZ) / 2;
   const ahx = (maxX - minX) / 2;
   const ahz = (maxZ - minZ) / 2;
-  const a = obbAxes(b);
-  const axes = [
-    [1, 0],
-    [0, 1],
-    [a.rx, a.rz],
-    [a.fx, a.fz],
-  ];
+  const c = Math.cos(b.yaw);
+  const s = Math.sin(b.yaw);
+  // Axes: world X, world Z, OBB right (c, -s), OBB forward (-s, -c).
+  _ax[0] = 1;
+  _az[0] = 0;
+  _ax[1] = 0;
+  _az[1] = 1;
+  _ax[2] = c;
+  _az[2] = -s;
+  _ax[3] = -s;
+  _az[3] = -c;
   let best = Infinity;
   let bx = 0;
   let bz = 0;
   const dx = b.cx - acx;
   const dz = b.cz - acz;
-  for (const [ax, az] of axes) {
+  for (let i = 0; i < 4; i++) {
+    const ax = _ax[i];
+    const az = _az[i];
     const ra = ahx * Math.abs(ax) + ahz * Math.abs(az);
-    const rb = projectObb(b, ax, az);
+    const rb = projectObb(b.halfW, b.halfL, c, s, ax, az);
     const dist = dx * ax + dz * az;
     const overlap = ra + rb - Math.abs(dist);
     if (overlap <= 0) return false;
@@ -129,22 +141,29 @@ export function obbVsAabb(b: Obb2, minX: number, minZ: number, maxX: number, max
 
 /** OBB vs OBB separating-axis test. MTV applies to `a`. */
 export function obbVsObb(a: Obb2, b: Obb2, out: Vec2Like): boolean {
-  const aa = obbAxes(a);
-  const ba = obbAxes(b);
-  const axes = [
-    [aa.rx, aa.rz],
-    [aa.fx, aa.fz],
-    [ba.rx, ba.rz],
-    [ba.fx, ba.fz],
-  ];
+  const ca = Math.cos(a.yaw);
+  const sa = Math.sin(a.yaw);
+  const cb = Math.cos(b.yaw);
+  const sb = Math.sin(b.yaw);
+  // Axes: a right, a forward, b right, b forward.
+  _ax[0] = ca;
+  _az[0] = -sa;
+  _ax[1] = -sa;
+  _az[1] = -ca;
+  _ax[2] = cb;
+  _az[2] = -sb;
+  _ax[3] = -sb;
+  _az[3] = -cb;
   let best = Infinity;
   let bx = 0;
   let bz = 0;
   const dx = a.cx - b.cx;
   const dz = a.cz - b.cz;
-  for (const [ax, az] of axes) {
-    const ra = projectObb(a, ax, az);
-    const rb = projectObb(b, ax, az);
+  for (let i = 0; i < 4; i++) {
+    const ax = _ax[i];
+    const az = _az[i];
+    const ra = projectObb(a.halfW, a.halfL, ca, sa, ax, az);
+    const rb = projectObb(b.halfW, b.halfL, cb, sb, ax, az);
     const dist = dx * ax + dz * az;
     const overlap = ra + rb - Math.abs(dist);
     if (overlap <= 0) return false;

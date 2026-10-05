@@ -144,6 +144,7 @@ export class Landmarks {
   private buildStore(): { door: Door; bell: PushButton } {
     const S = STORE;
     const t = 0.3;
+    const doorTop = 2.4;
     const solid = this.city.solid.bind(this.city);
     // Walls
     solid(S.minX, 0, S.minZ, S.maxX, S.height, S.minZ + t, { sight: true });
@@ -151,13 +152,15 @@ export class Landmarks {
     solid(S.maxX - t, 0, S.minZ, S.maxX, S.height, S.maxZ, { sight: true });
     solid(S.minX, 0, S.maxZ - t, S.doorX0, S.height, S.maxZ, { sight: true });
     solid(S.doorX1, 0, S.maxZ - t, S.maxX, S.height, S.maxZ, { sight: true });
-    solid(S.doorX0, 2.4, S.maxZ - t, S.doorX1, S.height, S.maxZ, { sight: true, walk: false });
+    solid(S.doorX0, doorTop, S.maxZ - t, S.doorX1, S.height, S.maxZ, { sight: true, walk: false });
     solid(S.minX, S.height, S.minZ, S.maxX, S.height + 0.3, S.maxZ, { sight: false, walk: false, cars: false });
 
-    // Exterior shell
+    // Exterior shell; the south face is rebuilt around the doorway (lined through the wall).
     const ext = new QuadBatch();
     const white = new THREE.Color('#e7e3ee');
-    ext.walls(S.minX, S.minZ, S.maxX, S.maxZ, 0, S.height + 0.3, 4, 4, white);
+    ext.walls(S.minX, S.minZ, S.maxX, S.maxZ, 0, S.height + 0.3, 4, 4, white, 's');
+    ext.wallWithOpening('x', S.maxZ, S.minX, S.maxX, 0, S.height + 0.3, S.doorX0, S.doorX1, doorTop, 1, 4, white);
+    ext.doorReveal('x', S.maxZ - t, S.maxZ, S.doorX0, S.doorX1, 0, doorTop, 4, white);
     ext.floor(S.minX, S.minZ, S.maxX, S.maxZ, S.height + 0.3, 4, new THREE.Color('#3a3842'));
     const extMesh = new THREE.Mesh(ext.build(), new THREE.MeshLambertMaterial({ vertexColors: true }));
     extMesh.castShadow = true;
@@ -181,12 +184,16 @@ export class Landmarks {
 
     // Interior
     const inner = new QuadBatch();
-    inner.innerWalls(S.minX + t, S.minZ + t, S.maxX - t, S.maxZ - t, 0, S.height, 2.5, new THREE.Color('#fff0d6'));
+    const innerCol = new THREE.Color('#fff0d6');
+    inner.innerWalls(S.minX + t, S.minZ + t, S.maxX - t, S.maxZ - t, 0, S.height, 2.5, innerCol, 's');
+    inner.wallWithOpening('x', S.maxZ - t, S.minX + t, S.maxX - t, 0, S.height, S.doorX0, S.doorX1, doorTop, -1, 2.5, innerCol);
     // Interiors get a warm emissive base: the hemisphere sky light is not occluded indoors.
     const innerMesh = new THREE.Mesh(inner.build(), new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.FrontSide, emissive: 0x4a3b28 }));
     this.group.add(innerMesh);
     const floor = new QuadBatch();
-    floor.floor(S.minX + t, S.minZ + t, S.maxX - t, S.maxZ - t, 0.035, 1.2, new THREE.Color('#ffffff'));
+    const floorCol = new THREE.Color('#ffffff');
+    floor.floor(S.minX + t, S.minZ + t, S.maxX - t, S.maxZ - t, 0.035, 1.2, floorCol);
+    floor.floor(S.doorX0, S.maxZ - t, S.doorX1, S.maxZ, 0.035, 1.2, floorCol); // threshold
     const floorMesh = new THREE.Mesh(floor.build(), new THREE.MeshLambertMaterial({ map: makeTileFloorTexture(), vertexColors: true, color: 0xfff2dc, emissive: 0x3a3020 }));
     floorMesh.receiveShadow = true;
     this.group.add(floorMesh);
@@ -344,18 +351,26 @@ export class Landmarks {
     solid(G.maxX - t, G.doorHeight, G.doorZ0, G.maxX, G.height, G.doorZ1, { sight: true, walk: false });
     solid(G.minX, G.height, G.minZ, G.maxX, G.height + 0.3, G.maxZ, { sight: false, walk: false, cars: false });
 
+    // Exterior shell; the east face is rebuilt around the roll-up door opening (lined through the wall).
     const ext = new QuadBatch();
-    ext.walls(G.minX, G.minZ, G.maxX, G.maxZ, 0, G.height + 0.3, 4, 4, new THREE.Color('#6e6a78'));
+    const gCol = new THREE.Color('#6e6a78');
+    ext.walls(G.minX, G.minZ, G.maxX, G.maxZ, 0, G.height + 0.3, 4, 4, gCol, 'e');
+    ext.wallWithOpening('z', G.maxX, G.minZ, G.maxZ, 0, G.height + 0.3, G.doorZ0, G.doorZ1, G.doorHeight, 1, 4, gCol);
+    ext.doorReveal('z', G.maxX - t, G.maxX, G.doorZ0, G.doorZ1, 0, G.doorHeight, 4, gCol);
     ext.floor(G.minX, G.minZ, G.maxX, G.maxZ, G.height + 0.3, 4, new THREE.Color('#2e2c35'));
     const extMesh = new THREE.Mesh(ext.build(), new THREE.MeshLambertMaterial({ vertexColors: true }));
     extMesh.castShadow = true;
     this.group.add(extMesh);
-    // Cut-out: dark opening plane is covered by the door panel; inner walls:
+    // Inner walls, with the same opening in the east face (the door panel sits inside the wall).
     const inner = new QuadBatch();
-    inner.innerWalls(G.minX + t, G.minZ + t, G.maxX - t, G.maxZ - t, 0, G.height, 3, new THREE.Color('#9a97a8'));
+    const iCol = new THREE.Color('#9a97a8');
+    inner.innerWalls(G.minX + t, G.minZ + t, G.maxX - t, G.maxZ - t, 0, G.height, 3, iCol, 'e');
+    inner.wallWithOpening('z', G.maxX - t, G.minZ + t, G.maxZ - t, 0, G.height, G.doorZ0, G.doorZ1, G.doorHeight, -1, 3, iCol);
     this.group.add(new THREE.Mesh(inner.build(), new THREE.MeshLambertMaterial({ vertexColors: true })));
     const floor = new QuadBatch();
-    floor.floor(G.minX + t, G.minZ + t, G.maxX - t, G.maxZ - t, 0.035, 3, new THREE.Color('#8d8a96'));
+    const gFloorCol = new THREE.Color('#8d8a96');
+    floor.floor(G.minX + t, G.minZ + t, G.maxX - t, G.maxZ - t, 0.035, 3, gFloorCol);
+    floor.floor(G.maxX - t, G.doorZ0, G.maxX, G.doorZ1, 0.035, 3, gFloorCol); // threshold
     this.group.add(new THREE.Mesh(floor.build(), new THREE.MeshLambertMaterial({ map: makePlazaTexture(), vertexColors: true })));
     const ceil = new THREE.Mesh(new THREE.PlaneGeometry(G.maxX - G.minX, G.maxZ - G.minZ), new THREE.MeshLambertMaterial({ color: 0x55525e }));
     ceil.rotation.x = Math.PI / 2;
@@ -440,6 +455,7 @@ export class Landmarks {
     }
     // Swung-open gate leaf
     posts.box(I.gateX0 - 0.1, h / 2, I.minZ - 2, 0.08, h * 0.9, 4, '#4a4e5c');
+    this.city.solid(I.gateX0 - 0.18, 0, I.minZ - 4, I.gateX0 - 0.02, h * 0.95, I.minZ, { sight: false, tag: 'fence' });
     // Impounded cars (static shells)
     const cars: [number, number, string][] = [
       [48, 64, '#6d2a3a'],
@@ -456,6 +472,7 @@ export class Landmarks {
     this.city.solid(56, 0, 69, 58, 0.9, 71, { sight: false });
     // Floodlight
     posts.box(I.maxX - 1, 3.5, I.minZ + 1, 0.15, 7, 0.15, '#2a2d38');
+    this.city.solid(I.maxX - 1.1, 0, I.minZ + 0.9, I.maxX - 0.9, 7, I.minZ + 1.1, { sight: false });
     const m = new THREE.Mesh(posts.build(), new THREE.MeshLambertMaterial({ vertexColors: true }));
     m.castShadow = true;
     this.group.add(m);
@@ -502,7 +519,22 @@ export class Landmarks {
     ring.position.set(fx, 2.6, fz);
     ring.rotation.x = Math.PI / 2;
     this.group.add(basin, rim, water, pillar, ring);
-    this.city.solid(fx - 3.4, 0, fz - 3.4, fx + 3.4, 0.7, fz + 3.4, { sight: false });
+    // Round basin collider (outer edge ~4.2 m). Physics: two 8-sided cylinders a
+    // half-segment apart (union radius 4.05..4.3). Walk / AI cars: union of centred
+    // rectangles whose corners lie on the circle (radius 4.01..4.3).
+    const basinR = 4.3;
+    for (const yaw of [0, Math.PI / 8]) {
+      const body = this.physics.addStaticCylinder(fx, 0.35, fz, basinR, 0.7);
+      body.quaternion.setFromEuler(0, yaw, 0);
+      body.aabbNeedsUpdate = true;
+    }
+    const strips = 12;
+    for (let i = 0; i < strips; i++) {
+      const a = ((i + 0.5) / strips) * (Math.PI / 2);
+      const hx = basinR * Math.cos(a);
+      const hz = basinR * Math.sin(a);
+      this.city.solid(fx - hx, 0, fz - hz, fx + hx, 0.7, fz + hz, { sight: false, physics: false });
+    }
     this.city.solid(fx - 0.6, 0, fz - 0.6, fx + 0.6, 2.4, fz + 0.6, { sight: false });
     this.glowPool(fx, fz, 14, 0x3df5ff, 0.25);
 

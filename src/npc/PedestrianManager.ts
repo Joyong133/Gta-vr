@@ -16,6 +16,9 @@ const HAIR = [0x1b1b1b, 0x3b2a1a, 0x6b4e2a, 0xb5651d, 0xe0d0b0, 0xff4fd8];
 
 const _push = { x: 0, z: 0 };
 const _loc = { x: 0, z: 0 };
+const _p = { x: 0, z: 0 };
+/** Scratch footprint of the pedestrian being updated (local avoidance frame). */
+const _self: Obb2 = { cx: 0, cz: 0, yaw: 0, halfW: 0.3, halfL: 0.3 };
 
 export class Pedestrian {
   state: PedState = 'walk';
@@ -78,8 +81,8 @@ export class Pedestrian {
     this.setState('knocked', tuning.pedestrians.knockedTime);
     this.fleeX = fromX;
     this.fleeZ = fromZ;
-    // Fall away from the impact.
-    this.yaw = Math.atan2(-(this.x - fromX), -(this.z - fromZ)) + Math.PI;
+    // Fall away from the impact: face away from it (forward = -Z), poseKnocked tips the body forward.
+    this.yaw = Math.atan2(-(this.x - fromX), -(this.z - fromZ));
   }
 
   update(dt: number, world: StaticWorld, movers: Movers, obstacles: readonly Obb2[], walkers: readonly Pedestrian[], time: number): void {
@@ -163,7 +166,10 @@ export class Pedestrian {
           az += (dz / d) * (1.6 - d) * 1.5 + desiredX * 0.6;
         }
       }
-      const self: Obb2 = { cx: this.x, cz: this.z, yaw: this.yaw, halfW: 0.3, halfL: 0.3 };
+      const self = _self;
+      self.cx = this.x;
+      self.cz = this.z;
+      self.yaw = this.yaw;
       for (const o of obstacles) {
         toObbLocal(self, o.cx, o.cz, _loc);
         if (-_loc.z > 0 && -_loc.z < 3.5 && Math.abs(_loc.x) < 2.6) {
@@ -181,11 +187,18 @@ export class Pedestrian {
       this.yaw += angleDelta(this.yaw, targetYaw) * Math.min(1, dt * 8);
       const nx = this.x + desiredX * speed * dt;
       const nz = this.z + desiredZ * speed * dt;
-      const p = { x: nx, z: nz };
+      const p = _p;
+      p.x = nx;
+      p.z = nz;
       world.resolveCircle(p, this.radius);
-      for (const o of obstacles) if (circleVsObb(p.x, p.z, this.radius, o, _push)) {
-        p.x += _push.x;
-        p.z += _push.z;
+      for (const o of obstacles) {
+        // Cheap reject: halfW + halfL bounds the footprint's half diagonal.
+        const reach = o.halfW + o.halfL + this.radius;
+        if (Math.abs(o.cx - p.x) > reach || Math.abs(o.cz - p.z) > reach) continue;
+        if (circleVsObb(p.x, p.z, this.radius, o, _push)) {
+          p.x += _push.x;
+          p.z += _push.z;
+        }
       }
       this.x = p.x;
       this.z = p.z;
@@ -305,7 +318,7 @@ export class PedestrianManager {
   publish(): void {
     for (const p of this.peds) {
       if (p.state === 'knocked') continue;
-      this.movers.walkers.push({ x: p.x, z: p.z, r: p.radius });
+      this.movers.addWalker(p.x, p.z, p.radius);
     }
   }
 

@@ -17,6 +17,9 @@ const _loc = { x: 0, z: 0 };
 const _push = { x: 0, z: 0 };
 const _pos = { x: 0, z: 0 };
 const _dir = { x: 0, z: 0 };
+const _p = { x: 0, z: 0 };
+/** Half width of the corridor directClear sweeps (car half width 0.95 + margin). */
+const CLEAR_HALF_WIDTH = 1.1;
 
 interface UnitBase {
   id: string;
@@ -27,6 +30,9 @@ interface UnitBase {
   perceptionTimer: number;
   targetX: number;
   targetZ: number;
+  /** Where this unit last actually saw the player (at a perception tick). */
+  seenX: number;
+  seenZ: number;
   searchTimer: number;
   distToPlayer: number;
   dispatchIndex: number;
@@ -40,6 +46,8 @@ export class PoliceCarUnit implements UnitBase {
   perceptionTimer = Math.random() * 0.2;
   targetX = 0;
   targetZ = 0;
+  seenX = 0;
+  seenZ = 0;
   searchTimer = 0;
   distToPlayer = Infinity;
   steer = 0;
@@ -47,8 +55,19 @@ export class PoliceCarUnit implements UnitBase {
   private path: number[] = [];
   private stuckTimer = 0;
   private reverseTimer = 0;
+  /** After getting stuck, follow the road graph strictly for a while instead of straight-line shortcuts. */
+  private noShortcutTimer = 0;
   private lastX = 0;
   private lastZ = 0;
+  /** Road point nearest the target (final approach) and the target it was computed for. Refreshed on re-plan. */
+  private approachX = 0;
+  private approachZ = 0;
+  private approachForX = NaN;
+  private approachForZ = NaN;
+  /** Road point nearest the car when it last re-planned (to get back onto the road from a lot). */
+  private roadX = 0;
+  private roadZ = 0;
+  private readonly tmpObb: Obb2 = { cx: 0, cz: 0, yaw: 0, halfW: 0.95, halfL: 2.25 };
   patrolLane: LanePath | null = null;
   desiredSpeed = 0;
 
@@ -79,6 +98,7 @@ export class PoliceCarUnit implements UnitBase {
       this.integrate(h, 0, world, others);
       return;
     }
+    if (this.noShortcutTimer > 0) this.noShortcutTimer -= h;
     // --- choose an aim point
     let aimX = this.targetX;
     let aimZ = this.targetZ;
@@ -95,24 +115,66 @@ export class PoliceCarUnit implements UnitBase {
       const e2 = this.patrolLane.points[this.patrolLane.points.length - 1];
       aimX = e2.x;
       aimZ = e2.z;
-    } else if (!this.directClear(world, aimX, aimZ)) {
+    } else if (this.noShortcutTimer > 0 || !this.directClear(world, aimX, aimZ)) {
       this.pathTimer -= h;
       if (this.pathTimer <= 0 || this.path.length === 0) {
         this.pathTimer = 1;
         const from = roads.nearestNode(car.x, car.z).id;
         const to = roads.nearestNode(this.targetX, this.targetZ).id;
         this.path = roads.findPath(from, to);
+        const ap = roads.nearestLanePoint(this.targetX, this.targetZ).pos;
+        this.approachX = ap.x;
+        this.approachZ = ap.z;
+        this.approachForX = this.targetX;
+        this.approachForZ = this.targetZ;
+        const rp = roads.nearestLanePoint(car.x, car.z).pos;
+        this.roadX = rp.x;
+        this.roadZ = rp.z;
       }
-      while (this.path.length > 0) {
-        const n = roads.nodes[this.path[0]];
-        if (Math.hypot(n.x - car.x, n.z - car.z) < 8 && this.path.length > 1) this.path.shift();
+      // Drop nodes already reached or already passed. Right after a re-plan path[0] is still the
+      // junction the car just drove through (it stays the nearest node for half a block), so a car
+      // that is already on the road leg toward path[1] must not be sent back to it.
+      while (this.path.length > 1) {
+        const a = roads.nodes[this.path[0]];
+        const b = roads.nodes[this.path[1]];
+        const lx = b.x - a.x;
+        const lz = b.z - a.z;
+        const leg = Math.hypot(lx, lz) || 1;
+        const rx = car.x - a.x;
+        const rz = car.z - a.z;
+        const along = (rx * lx + rz * lz) / leg;
+        const lateral = Math.abs(rx * lz - rz * lx) / leg;
+        if (Math.hypot(rx, rz) < NODE_REACHED || (along > roads.junctionHalf && lateral < LEG_CORRIDOR)) this.path.shift();
         else break;
       }
       if (this.path.length > 0) {
         const n = roads.nodes[this.path[0]];
         aimX = n.x;
         aimZ = n.z;
+        // Out on a leg keep a little right of the centre line, so police cars driving the same
+        // leg in opposite directions pass each other (and still fit between the traffic lanes).
+        const nd = Math.hypot(n.x - car.x, n.z - car.z);
+        if (nd > 2 * NODE_REACHED) {
+          aimX += (-(n.z - car.z) / nd) * LANE_BIAS;
+          aimZ += ((n.x - car.x) / nd) * LANE_BIAS;
+        }
+        // Final leg: head for the road point nearest the target instead of circling the junction centre.
+        if (
+          this.path.length === 1 &&
+          (nd < NODE_REACHED || (this.noShortcutTimer <= 0 && this.directClear(world, this.approachX, this.approachZ)))
+        ) {
+          aimX = this.approachX;
+          aimZ = this.approachZ;
+        }
+        // Off the road (e.g. leaving the precinct lot) with no straight line: get onto the nearest lane first.
+        if (!roads.isOnRoad(car.x, car.z) && !this.directClear(world, aimX, aimZ)) {
+          aimX = this.roadX;
+          aimZ = this.roadZ;
+        }
       }
+    } else {
+      // Straight line to the target: re-plan as soon as it is lost.
+      this.pathTimer = 0;
     }
 
     // --- steering toward aim
@@ -133,28 +195,66 @@ export class PoliceCarUnit implements UnitBase {
     for (const o of others) {
       toObbLocal(car.obb, o.cx, o.cz, _loc);
       const fwd = -_loc.z;
-      if (fwd > 0 && fwd < 10 && Math.abs(_loc.x) < 2) v = Math.min(v, Math.max(0, (fwd - 5) * 1.2));
+      if (fwd > 0 && fwd < 10 && Math.abs(_loc.x) < 1.9) {
+        if (Math.cos(o.yaw - car.yaw) < -0.5) {
+          // Oncoming (e.g. another police car on the same leg): keep right and creep past
+          // instead of both waiting nose to nose forever.
+          steer = clamp(steer - 0.45, -0.62, 0.62);
+          v = Math.min(v, 4);
+        } else v = Math.min(v, Math.max(0, (fwd - 5) * 1.2));
+      }
     }
     // Reverse out when stuck
     if (this.reverseTimer > 0) {
       this.reverseTimer -= h;
       v = -4;
       steer = -steer;
+      this.resetStuckWindow();
     } else if (this.desiredSpeed > 2) {
-      const moved = Math.hypot(car.x - this.lastX, car.z - this.lastZ);
-      if (moved < 0.02) this.stuckTimer += h;
-      else this.stuckTimer = Math.max(0, this.stuckTimer - h);
+      // Net progress over a window: scraping along a pole jitters the car every step without getting anywhere.
+      this.stuckTimer += h;
       if (this.stuckTimer > 1.5) {
-        this.stuckTimer = 0;
-        this.reverseTimer = 1.2;
+        const moved = Math.hypot(car.x - this.lastX, car.z - this.lastZ);
+        this.resetStuckWindow();
+        if (moved < 1.5) {
+          this.reverseTimer = 1.2;
+          // The straight line that got us stuck may only look clear (the feeler rays can miss a thin pole).
+          this.noShortcutTimer = 4;
+        }
       }
-    }
-    this.lastX = car.x;
-    this.lastZ = car.z;
+    } else this.resetStuckWindow();
     this.steer = moveToward(this.steer, steer, 3 * h);
     const accel = Math.abs(v) > Math.abs(car.speed) ? 6 : 10;
     car.speed = moveToward(car.speed, v, accel * h);
     this.integrate(h, this.steer, world, others);
+  }
+
+  /** Forget the current route and any stuck recovery (after a teleport home). */
+  resetNav(): void {
+    this.path.length = 0;
+    this.pathTimer = 0;
+    this.reverseTimer = 0;
+    this.noShortcutTimer = 0;
+    this.steer = 0;
+    this.resetStuckWindow();
+  }
+
+  private resetStuckWindow(): void {
+    this.stuckTimer = 0;
+    this.lastX = this.car.x;
+    this.lastZ = this.car.z;
+  }
+
+  /**
+   * Has the car reached the road point nearest its current target? (The target itself may be
+   * off the road and out of reach, e.g. an LKP behind a building.)
+   */
+  reachedApproach(): boolean {
+    return (
+      this.approachForX === this.targetX &&
+      this.approachForZ === this.targetZ &&
+      Math.hypot(this.approachX - this.car.x, this.approachZ - this.car.z) < 6
+    );
   }
 
   private integrate(h: number, steer: number, world: StaticWorld, others: Obb2[]): void {
@@ -162,7 +262,10 @@ export class PoliceCarUnit implements UnitBase {
     car.yaw += (car.speed / 2.7) * Math.tan(steer) * h;
     car.x += -Math.sin(car.yaw) * car.speed * h;
     car.z += -Math.cos(car.yaw) * car.speed * h;
-    const obb: Obb2 = { cx: car.x, cz: car.z, yaw: car.yaw, halfW: 0.95, halfL: 2.25 };
+    const obb = this.tmpObb;
+    obb.cx = car.x;
+    obb.cz = car.z;
+    obb.yaw = car.yaw;
     if (world.resolveObb(obb, _push)) {
       car.x = obb.cx;
       car.z = obb.cz;
@@ -179,21 +282,16 @@ export class PoliceCarUnit implements UnitBase {
     car.setBraking(car.speed < 0.5);
   }
 
-  /** Clear straight drive to the point? (three parallel rays at bumper height) */
+  /**
+   * Clear straight drive to the point? Sweeps a car-width corridor (a few parallel rays used to
+   * slip past thin lamp / signal poles that the car body then ran into).
+   */
   private directClear(world: StaticWorld, tx: number, tz: number): boolean {
     const car = this.car;
     const dx = tx - car.x;
     const dz = tz - car.z;
-    const len = Math.hypot(dx, dz);
-    if (len < 4) return true;
-    const ux = dx / len;
-    const uz = dz / len;
-    for (const off of [-1.1, 0, 1.1]) {
-      const ox = car.x + -uz * off;
-      const oz = car.z + ux * off;
-      if (world.raycast(ox, 0.8, oz, ux, 0, uz, len, carBlocker)) return false;
-    }
-    return true;
+    if (dx * dx + dz * dz < 16) return true;
+    return !world.isCorridorBlocked(car.x, car.z, tx, tz, CLEAR_HALF_WIDTH, carBlocker);
   }
 
   private feeler(world: StaticWorld, angle: number, len: number): number {
@@ -209,6 +307,13 @@ export class PoliceCarUnit implements UnitBase {
   }
 }
 
+/** Right-hand offset from a road leg's centre line while driving the leg (traffic lanes are 3 m out). */
+const LANE_BIAS = 1;
+/** A junction counts as reached this close to its centre (then the car turns toward the next waypoint). */
+const NODE_REACHED = 8;
+/** A car out of the junction box and this close to a road leg's centre line is on that leg (road + sidewalk). */
+const LEG_CORRIDOR = 10;
+
 const carBlocker = (b: { blocksCars: boolean; maxY: number; minY: number }): boolean => b.blocksCars && b.maxY > 0.3 && b.minY < 1.5;
 
 export class OfficerUnit implements UnitBase {
@@ -219,6 +324,8 @@ export class OfficerUnit implements UnitBase {
   perceptionTimer = Math.random() * 0.2;
   targetX = 0;
   targetZ = 0;
+  seenX = 0;
+  seenZ = 0;
   searchTimer = 0;
   distToPlayer = Infinity;
   x: number;
@@ -241,7 +348,7 @@ export class OfficerUnit implements UnitBase {
     this.yaw = home.yaw;
   }
 
-  update(dt: number, world: StaticWorld, movers: Movers, obstacles: Obb2[], time: number): void {
+  update(dt: number, world: StaticWorld, _movers: Movers, obstacles: Obb2[], time: number): void {
     let tx = this.x;
     let tz = this.z;
     let speed = 0;
@@ -263,8 +370,10 @@ export class OfficerUnit implements UnitBase {
         break;
       }
       case 'pursue':
-        tx = movers.playerX;
-        tz = movers.playerZ;
+        // decide() refreshes the target from the player only while this officer sees them;
+        // after losing sight it heads for where the player was last seen.
+        tx = this.targetX;
+        tz = this.targetZ;
         speed = tuning.police.officerRunSpeed;
         if (Math.hypot(tx - this.x, tz - this.z) < 1.1) speed = 0;
         break;
@@ -291,7 +400,9 @@ export class OfficerUnit implements UnitBase {
       const ux = dx / d;
       const uz = dz / d;
       this.yaw += angleDelta(this.yaw, Math.atan2(-ux, -uz)) * Math.min(1, dt * 8);
-      const p = { x: this.x + ux * speed * dt, z: this.z + uz * speed * dt };
+      const p = _p;
+      p.x = this.x + ux * speed * dt;
+      p.z = this.z + uz * speed * dt;
       world.resolveCircle(p, 0.3);
       for (const o of obstacles) {
         // circle vs car footprint
@@ -315,7 +426,8 @@ export class OfficerUnit implements UnitBase {
     } else {
       this.speed = 0;
       if (this.state === 'pursue') {
-        this.yaw += angleDelta(this.yaw, Math.atan2(-(movers.playerX - this.x), -(movers.playerZ - this.z))) * Math.min(1, dt * 6);
+        // Face the player while seen, else where they were last seen (no live position through walls).
+        if (d > 0.3) this.yaw += angleDelta(this.yaw, Math.atan2(-dx, -dz)) * Math.min(1, dt * 6);
         this.model.poseWave(time);
       } else this.model.poseIdle(time);
     }
@@ -342,6 +454,9 @@ export class PoliceManager {
   private time = 0;
   arrestProgress = 0;
   private readonly obstacles: Obb2[] = [];
+  /** Every unit (cars then officers); built once. */
+  readonly units: readonly PoliceUnit[];
+  private readonly sirenBuf: PoliceCarUnit[] = [];
   /** Player state, supplied each frame. */
   playerY = 1.6;
   playerInCar = false;
@@ -382,10 +497,7 @@ export class PoliceManager {
       this.group.add(model.root);
       this.officers.push(new OfficerUnit(`officer_${i}`, model, home, i, i === 0 ? 'patrol' : 'idle'));
     });
-  }
-
-  get units(): PoliceUnit[] {
-    return [...this.cars, ...this.officers];
+    this.units = [...this.cars, ...this.officers];
   }
 
   /** Can any unit see a world point right now? (crime witnessing) */
@@ -396,24 +508,21 @@ export class PoliceManager {
     return false;
   }
 
-  private unitPose(u: PoliceUnit): { x: number; z: number; yaw: number; eye: number } {
-    if (u.kind === 'car') return { x: u.car.x, z: u.car.z, yaw: u.car.yaw, eye: 1.3 };
-    return { x: u.x, z: u.z, yaw: u.yaw, eye: 1.65 };
-  }
-
   private canSee(u: PoliceUnit, x: number, y: number, z: number, range: number): boolean {
-    const p = this.unitPose(u);
-    const dx = x - p.x;
-    const dz = z - p.z;
+    const ux = u.x;
+    const uz = u.z;
+    const dx = x - ux;
+    const dz = z - uz;
     const d = Math.hypot(dx, dz);
     if (d > range) return false;
     if (d > tuning.police.proximityAwareness) {
-      const fx = -Math.sin(p.yaw);
-      const fz = -Math.cos(p.yaw);
+      const fx = -Math.sin(u.yaw);
+      const fz = -Math.cos(u.yaw);
       const cos = (fx * dx + fz * dz) / Math.max(d, 1e-4);
       if (cos < Math.cos((tuning.police.sightFovDeg / 2) * DEG2RAD)) return false;
     }
-    return !this.staticWorld.isSightBlocked(p.x, p.eye, p.z, x, y, z);
+    const eye = u.kind === 'car' ? 1.3 : 1.65;
+    return !this.staticWorld.isSightBlocked(ux, eye, uz, x, y, z);
   }
 
   private dispatchCount(kind: 'car' | 'officer'): number {
@@ -432,17 +541,24 @@ export class PoliceManager {
     this.movers.carObbs(undefined, this.obstacles);
 
     for (const u of this.units) {
-      const pose = this.unitPose(u);
-      u.distToPlayer = Math.hypot(px - pose.x, pz - pose.z);
+      u.distToPlayer = Math.hypot(px - u.x, pz - u.z);
       u.perceptionTimer -= dt;
       if (u.perceptionTimer <= 0) {
         u.perceptionTimer = tuning.police.perceptionInterval;
         const stunned = u.kind === 'officer' && u.stunned > 0;
+        const saw = u.sees;
         u.sees = !stunned && w.level > 0 && this.canSee(u, px, this.playerInCar ? 1.0 : this.playerY, pz, range);
         if (u.sees) {
           u.lastSeen = 0;
+          u.seenX = px;
+          u.seenZ = pz;
           w.reportSighting(px, pz);
           this.onSighting?.(u);
+        } else if (saw && u.state === 'pursue') {
+          // Lost sight: between perception ticks decide() tracked the live position; fall back to
+          // where the player was actually last seen.
+          u.targetX = u.seenX;
+          u.targetZ = u.seenZ;
         }
       }
       if (!u.sees) u.lastSeen += dt;
@@ -495,14 +611,14 @@ export class PoliceManager {
     } else if (u.state === 'respond') {
       u.targetX = w.lkpX;
       u.targetZ = w.lkpZ;
-      if (Math.hypot(u.targetX - this.unitPose(u).x, u.targetZ - this.unitPose(u).z) < 10) {
+      // Cars may not reach an off-road LKP: arriving at the road point nearest to it is enough.
+      if (Math.hypot(u.targetX - u.x, u.targetZ - u.z) < 10 || (u.kind === 'car' && u.reachedApproach())) {
         u.state = 'search';
         u.searchTimer = 0;
       }
     } else if (u.state === 'search') {
-      const p = this.unitPose(u);
       u.searchTimer -= dt;
-      if (u.searchTimer <= 0 || Math.hypot(u.targetX - p.x, u.targetZ - p.z) < 6) {
+      if (u.searchTimer <= 0 || Math.hypot(u.targetX - u.x, u.targetZ - u.z) < 6) {
         // New random point inside the search area (police search, they do not know where you are).
         const r = w.searchRadius * Math.sqrt(this.rng());
         const a = this.rng() * Math.PI * 2;
@@ -527,6 +643,8 @@ export class PoliceManager {
       } else if (u.state === 'respond') u.desiredSpeed = pt.carPursuitSpeed[lvl] * 0.85;
       else if (u.state === 'search') u.desiredSpeed = 9;
       else if (u.state === 'patrol') u.desiredSpeed = pt.carPatrolSpeed;
+      // An undispatched car still returning when a new crime comes in must still be able to arrive.
+      else if (u.state === 'return') this.carReturnLogic(u);
     }
   }
 
@@ -564,8 +682,8 @@ export class PoliceManager {
   private readonly fixedOthers: Obb2[] = [];
 
   publish(): void {
-    for (const c of this.cars) this.movers.cars.push({ id: c.id, kind: 'police', obb: c.car.obb, speed: Math.abs(c.car.speed) });
-    for (const o of this.officers) this.movers.walkers.push({ x: o.x, z: o.z, r: 0.3 });
+    for (const c of this.cars) this.movers.addCar(c.id, 'police', c.car.obb, Math.abs(c.car.speed));
+    for (const o of this.officers) this.movers.addWalker(o.x, o.z, 0.3);
   }
 
   private updateArrest(dt: number): void {
@@ -574,12 +692,13 @@ export class PoliceManager {
     if (this.wanted.level > 0) {
       if (!this.playerInCar) {
         for (const o of this.officers) {
-          if (o.state === 'pursue' && o.stunned <= 0 && o.distToPlayer < pt.arrestDistance) arresting = true;
+          // Arrests need actual sight (not just a pursuit kept alive for lostSightTime behind a wall).
+          if (o.state === 'pursue' && o.sees && o.stunned <= 0 && o.distToPlayer < pt.arrestDistance) arresting = true;
         }
         if (arresting) this.arrestProgress += dt / pt.arrestTime;
       } else if (this.playerSpeed < 1.5) {
         for (const c of this.cars) {
-          if (c.state === 'pursue' && c.distToPlayer < pt.carArrestDistance + 2) arresting = true;
+          if (c.state === 'pursue' && c.sees && c.distToPlayer < pt.carArrestDistance + 2) arresting = true;
         }
         if (arresting) this.arrestProgress += dt / pt.carArrestTime;
       }
@@ -598,6 +717,7 @@ export class PoliceManager {
       c.car.speed = 0;
       c.car.setPose(c.home.x, c.home.z, c.home.yaw);
       c.patrolLane = null;
+      c.resetNav();
     }
     for (const o of this.officers) {
       o.state = o.dispatchIndex === 0 ? 'patrol' : 'idle';
@@ -608,11 +728,26 @@ export class PoliceManager {
     this.arrestProgress = 0;
   }
 
-  /** Units that should sound sirens, nearest first (audio limits the count). */
+  /**
+   * Units that should sound sirens, nearest first (audio limits the count).
+   * Returns a reused array: valid until the next call.
+   */
   sirenUnits(viewer: THREE.Vector3): PoliceCarUnit[] {
-    return this.cars
-      .filter((c) => c.state === 'respond' || c.state === 'pursue' || c.state === 'search')
-      .sort((a, b) => (a.car.x - viewer.x) ** 2 + (a.car.z - viewer.z) ** 2 - ((b.car.x - viewer.x) ** 2 + (b.car.z - viewer.z) ** 2));
+    const out = this.sirenBuf;
+    out.length = 0;
+    for (const c of this.cars) {
+      if (c.state !== 'respond' && c.state !== 'pursue' && c.state !== 'search') continue;
+      // Insertion sort by distance (at most three cars).
+      const d = (c.car.x - viewer.x) ** 2 + (c.car.z - viewer.z) ** 2;
+      let i = out.length;
+      out.push(c);
+      while (i > 0 && (out[i - 1].car.x - viewer.x) ** 2 + (out[i - 1].car.z - viewer.z) ** 2 > d) {
+        out[i] = out[i - 1];
+        i--;
+      }
+      out[i] = c;
+    }
+    return out;
   }
 
   officerHitTest(x: number, y: number, z: number, r: number): OfficerUnit | null {

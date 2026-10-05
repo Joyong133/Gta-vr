@@ -34,6 +34,7 @@ export type OneShot =
 const _p = new THREE.Vector3();
 const _f = new THREE.Vector3();
 const _u = new THREE.Vector3();
+const _q = new THREE.Quaternion();
 
 class Loop {
   readonly panner: PannerNode;
@@ -139,7 +140,7 @@ export class AudioEngine {
     if (!ctx) return;
     camera.getWorldPosition(_p);
     camera.getWorldDirection(_f);
-    _u.set(0, 1, 0).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion()));
+    _u.set(0, 1, 0).applyQuaternion(camera.getWorldQuaternion(_q));
     const l = ctx.listener;
     if (l.positionX) {
       l.positionX.value = _p.x;
@@ -362,13 +363,14 @@ export class AudioEngine {
   updateSirens(positions: THREE.Vector3[]): void {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    this.sirens.forEach((s, i) => {
+    for (let i = 0; i < this.sirens.length; i++) {
+      const s = this.sirens[i];
       const p = positions[i];
       if (p) {
         s.loop.setPos(p);
         s.loop.gain.gain.setTargetAtTime(0.09, t, 0.2);
       } else s.loop.gain.gain.setTargetAtTime(0, t, 0.3);
-    });
+    }
   }
 
   private makeHorn(): void {

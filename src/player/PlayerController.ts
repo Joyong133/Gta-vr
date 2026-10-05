@@ -93,8 +93,12 @@ export class PlayerController {
   update(dt: number, a: Actions): void {
     const xr = this.d.isXR();
     if (this.busy) {
-      this.d.vehicle.physics.controls.throttle = 0;
-      this.d.vehicle.physics.controls.brake = this.driving ? 0.3 : 0;
+      // Hold the car on the handbrake during fades. brake > 0.05 would mean
+      // reverse once the car is slow; an empty car is parked (physics.enabled).
+      const c = this.d.vehicle.physics.controls;
+      c.throttle = 0;
+      c.brake = 0;
+      c.handbrake = this.driving;
       return;
     }
     if (this.mode === 'foot') {
@@ -182,6 +186,7 @@ export class PlayerController {
       }
       this.mode = 'driving';
       v.occupied = true;
+      v.physics.enabled = true;
       v.wheelGrab.enabled = this.d.settings().comfort.wheelGrabSteering;
       this.d.locomotion.enabled = false;
       this.desktopCarLook = 0;
@@ -210,8 +215,6 @@ export class PlayerController {
       const spot = new THREE.Vector3();
       v.findExitSpot(this.carObbs, spot);
       this.placeOnFoot(spot.x, spot.z, v.physics.yaw() + this.seatYawOffset + this.desktopCarLook);
-      v.physics.controls.throttle = 0;
-      v.physics.controls.brake = 1;
       this.d.bus.emit('vehicle:exit', { vehicleId: v.id });
       await this.d.overlay.fadeIn(0.25);
       setTimeout(() => v.door.close(), 600);
@@ -225,6 +228,14 @@ export class PlayerController {
     const v = this.d.vehicle;
     this.mode = 'foot';
     v.occupied = false;
+    // Park the empty car: brakes on, wheels straight, never reverses. Stale
+    // driver input is cleared so nothing carries over to the next drive.
+    const c = v.physics.controls;
+    c.throttle = 0;
+    c.brake = 0;
+    c.steer = 0;
+    c.handbrake = false;
+    v.physics.enabled = false;
     v.wheelGrab.releaseAll();
     v.wheelGrab.enabled = false;
     this.d.onHorn(false);
@@ -250,6 +261,9 @@ export class PlayerController {
       this.d.movers.carObbs(v.id, this.carObbs);
       v.recover(this.carObbs);
       if (this.driving) {
+        // Let the suspension settle while the screen is still black so the
+        // seated player never sees the car drop or bounce.
+        await this.waitFor(() => p.vehicle.numWheelsOnGround === 4 && Math.abs(v.body.velocity.y) < 0.15, 0.8);
         this.applySeat();
         await this.d.overlay.fadeIn(0.3);
       }
@@ -268,12 +282,7 @@ export class PlayerController {
     try {
       await this.d.overlay.fadeOut(0.25);
       if (!keepItems) this.d.interaction.releaseAll();
-      if (this.driving) {
-        const v = this.d.vehicle;
-        v.physics.controls.throttle = 0;
-        v.physics.controls.brake = 1;
-        this.d.bus.emit('vehicle:exit', { vehicleId: v.id });
-      }
+      if (this.driving) this.d.bus.emit('vehicle:exit', { vehicleId: this.d.vehicle.id });
       this.placeOnFoot(x, z, 0);
       this.d.rig.spawnAt(x, z, 0, yaw);
       this.d.locomotion.warp(x, z);

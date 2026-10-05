@@ -42,6 +42,11 @@ export class InteractionManager {
   private readonly dragging = new Map<InteractorHand, Interactable & Draggable>();
   /** Desktop: max distance for picking things with the mouse ray. */
   desktopReach = 3.2;
+  /**
+   * While this returns a socket (the player car's passenger seat while driving), every release or
+   * throw goes into that socket or is dropped outside the cabin, never left inside the chassis.
+   */
+  carSocket: (() => Socket | null) | null = null;
 
   constructor(
     private readonly world: StaticWorld,
@@ -66,7 +71,12 @@ export class InteractionManager {
   }
 
   setHands(hands: InteractorHand[]): void {
-    for (const h of this.hands) this.releaseHand(h, true);
+    for (const h of this.hands) {
+      if (hands.includes(h)) continue; // still connected: keep its item, drag and hover
+      this.releaseHand(h, true);
+      this.setHover(h, null, false);
+      h.updateVisual(null, null);
+    }
     this.hands.length = 0;
     this.hands.push(...hands);
   }
@@ -233,6 +243,7 @@ export class InteractionManager {
         return;
       }
     }
+    if (this.releaseInCar(item, hand)) return;
     this.keepOutOfWalls(item);
     this.events.onRelease?.(item, hand);
   }
@@ -243,9 +254,34 @@ export class InteractionManager {
     if (!item) return;
     const free = item.release(hand, velocity, _w.set(0, 0, 0));
     if (free) {
+      if (this.releaseInCar(item, hand)) return;
       this.keepOutOfWalls(item);
       this.events.onRelease?.(item, hand);
     }
+  }
+
+  /**
+   * Seated in the car: a freed item would otherwise become a dynamic prop inside the chassis
+   * colliders and get squeezed out onto the road. Seat it, or drop it above the roof.
+   * Returns true when handled (onRelease already emitted).
+   */
+  private releaseInCar(item: Grabbable, hand: InteractorHand): boolean {
+    const car = this.carSocket?.();
+    if (!car) return false;
+    if (car.canAccept(item)) {
+      car.insert(item);
+      hand.pulse(0.5, 60);
+      this.events.onSocket?.(item, car);
+    } else {
+      // Not seat-able (non-mission item or seat taken): never leave it inside the cabin box.
+      car.worldPosition(_a);
+      item.object.position.set(_a.x, _a.y + 1.4, _a.z);
+      item.setKinematic(false);
+      item.body?.velocity.set(0, 0, 0);
+      item.body?.angularVelocity.set(0, 0, 0);
+    }
+    this.events.onRelease?.(item, hand);
+    return true;
   }
 
   /** If an item was released inside a wall, move it back toward the player's head. */

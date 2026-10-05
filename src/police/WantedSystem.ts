@@ -120,6 +120,20 @@ export class WantedSystem {
     this.setLevel(0);
   }
 
+  /**
+   * Busted / restart / load: drop to 0 without the "escaped" onCleared callback
+   * (onChanged still reports the level change).
+   */
+  reset(): void {
+    const prev = this.level;
+    this.level = 0;
+    this.hasLkp = false;
+    this.timeSinceSeen = Infinity;
+    this.cooldown = 0;
+    this.crimeCooldown.clear();
+    if (prev !== 0) this.onChanged?.(0, prev);
+  }
+
   update(dt: number, playerX: number, playerZ: number): void {
     for (const [k, v] of this.crimeCooldown) this.crimeCooldown.set(k, Math.max(0, v - dt));
     if (this.level === 0) return;

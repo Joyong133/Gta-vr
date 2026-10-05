@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { tuning } from '../config/tuning';
 
 const _v = new THREE.Vector3();
+const _h = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler(0, 0, 0, 'YXZ');
 const UP = new THREE.Vector3(0, 1, 0);
@@ -104,7 +105,7 @@ export class PlayerRig {
   /** Rotates the rig about the vertical axis through the head (snap / smooth turn). */
   rotateAroundHead(angle: number): void {
     this.rig.updateMatrixWorld(true);
-    const head = this.headWorld(new THREE.Vector3());
+    const head = this.headWorld(_h);
     _q.setFromAxisAngle(UP, angle);
     _v.copy(this.rig.position).sub(head).applyQuaternion(_q);
     this.rig.position.copy(head).add(_v);
@@ -115,7 +116,7 @@ export class PlayerRig {
   /** Moves the rig so that the head ends up above (x, z), with the floor at y. */
   placeHeadAt(x: number, z: number, floorY: number): void {
     this.rig.updateMatrixWorld(true);
-    const head = this.headWorld(new THREE.Vector3());
+    const head = this.headWorld(_h);
     this.rig.position.x += x - head.x;
     this.rig.position.z += z - head.z;
     this.rig.position.y = floorY;

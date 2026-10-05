@@ -27,7 +27,7 @@ import { PlayerRig } from '../player/PlayerRig';
 import { Teleport } from '../player/Teleport';
 import { XRHands } from '../player/XRHands';
 import { CrimeSystem } from '../police/CrimeSystem';
-import { PoliceManager } from '../police/PoliceManager';
+import { PoliceManager, type PoliceCarUnit } from '../police/PoliceManager';
 import { WantedSystem } from '../police/WantedSystem';
 import { SaveSystem, defaultSaveData, type LoadResult, type SaveData } from '../save/SaveSystem';
 import { Movers } from '../traffic/Movers';
@@ -54,6 +54,7 @@ export type StartMode = 'desktop' | 'xr';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
+const _n = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 
 /**
@@ -130,6 +131,20 @@ export class Game {
   private readonly carObbs: Obb2[] = [];
   private readonly knocked: import('../npc/PedestrianManager').Pedestrian[] = [];
   private hornOn = false;
+  /** Seated stance without a height calibration yet: calibrate on the next tracked XR frame. */
+  private seatedCalibPending = false;
+  // Per-frame scratch (no allocations in the frame loop).
+  private readonly sirenPos = [new THREE.Vector3(), new THREE.Vector3()];
+  private readonly sirenList: THREE.Vector3[] = [];
+  private readonly deskAimRes = { origin: new THREE.Vector3(), dir: new THREE.Vector3() };
+  /** Desktop blaster aim: along the view (PulseBlaster copies the result immediately). */
+  private readonly deskAim = (): { origin: THREE.Vector3; dir: THREE.Vector3 } => {
+    const r = this.deskAimRes;
+    this.camera.getWorldPosition(r.origin);
+    this.camera.getWorldDirection(r.dir);
+    r.origin.addScaledVector(r.dir, 0.6);
+    return r;
+  };
   /** Exposed for automated tests (window.neon). */
   frameCount = 0;
 
@@ -210,6 +225,8 @@ export class Game {
       isXR: () => this.isXR,
       onHorn: (on) => (this.hornOn = on),
     });
+    // Seated in the car: releases go to the passenger seat (or outside), never into the chassis.
+    this.interaction.carSocket = () => (this.player.driving ? this.vehicle.passengerSocket : null);
 
     // ---------- interactables in the world
     this.interaction.register(this.vehicle.door);
@@ -341,7 +358,9 @@ export class Game {
       },
       onFailed: (m, reason) => {
         this.audio.play('mission_fail');
-        this.toast(`미션 실패: ${reason} — 손목 메뉴/MIKA에서 재시작`, 'bad', 5);
+        // lastFailure is what the wrist menu's "restart failed mission" button uses (cleared on abandon).
+        const hint = this.missions.lastFailure ? '손목 메뉴/MIKA에서 재시작' : 'MIKA에게 다시 받을 수 있습니다';
+        this.toast(`미션 실패: ${reason} — ${hint}`, 'bad', 5);
         this.missionWorld.resetAll();
         this.bus.emit('mission:failed', { id: m.id, reason });
       },
@@ -392,6 +411,10 @@ export class Game {
           if (!m) return null;
           const cp = this.missions.checkpointProgress;
           return { title: m.title, objective: this.missions.currentObjective?.text ?? '', timeLeft: this.missions.timeLeft(), progress: cp ? `체크포인트 ${cp.index}/${cp.total}` : null };
+        },
+        canRestartFailed: () => {
+          const f = this.missions.lastFailure;
+          return !this.missions.activeDef && !!f && !this.missions.completed.has(f.id);
         },
         settings: () => this.settings,
         changeSettings: (fn) => this.changeSettings(fn),
@@ -463,6 +486,7 @@ export class Game {
     this.applySave(result.data, true);
     if (opts.seated) this.settings.comfort.stance = 'seated';
     if (opts.leftHanded) this.settings.comfort.dominantHand = 'left';
+    this.seatedCalibPending = this.settings.comfort.stance === 'seated' && this.settings.comfort.heightOffset === 0;
     this.applySettings();
     this.started = true;
     this.hud.setVisible(mode === 'desktop');
@@ -505,11 +529,16 @@ export class Game {
     this.debug.setXR(false);
     this.hud.setVisible(true);
     this.menu.attachTo(null);
+    // The DOM menu was never shown for the wrist menu: an open flag would silently block desktop input.
+    if (this.menu.open) this.menu.setOpen(false);
     this.watch.mesh.removeFromParent();
     this.interaction.setHands([this.desktopHand]);
+    this.rig.setHeightOffset(0); // the VR height calibration does not apply on desktop
     this.player.position(_v);
     this.rig.rig.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.rig.headYaw());
     this.rig.placeHeadAt(_v.x, _v.z, this.rig.rig.position.y);
+    // three's own 'end' listener already cleared isPresenting: this resets the seat to the desktop pose.
+    if (this.player.driving) this.player.recenter();
   }
 
   private onXRHandsChanged(): void {
@@ -570,8 +599,15 @@ export class Game {
     if (this.isXR) this.xrHands.feedInputs();
     this.input.update();
     const a = this.input.actions;
-    this.rig.setHeightOffset(this.settings.comfort.heightOffset);
+    // The height calibration is a VR thing: desktop already uses a fixed standing eye height.
+    this.rig.setHeightOffset(this.isXR ? this.settings.comfort.heightOffset : 0);
     this.rig.syncHead(this.renderer);
+    if (this.seatedCalibPending && this.isXR && this.rig.trackedHeadHeight() > 0.3) {
+      // First tracked frame with a seated stance: raise the eye height (also avoids
+      // calling calibrateHeight -> changeSettings from inside changeSettings).
+      this.seatedCalibPending = false;
+      this.calibrateHeight();
+    }
     if (this.xrPlacePending && this.isXR) {
       const p = this.xrPlacePending;
       this.xrPlacePending = null;
@@ -594,9 +630,13 @@ export class Game {
     const menuBlocks = this.menu.open && !this.isXR;
     if (this.started && !menuBlocks) this.player.update(dt, a);
     else if (this.player.driving) {
+      // Hold the car while the desktop menu is open. brake > 0.05 means reverse once the
+      // car is slow, so it only brakes while still rolling forward; the handbrake holds it.
       const c = this.vehicle.physics.controls;
       c.throttle = 0;
-      c.brake = 0.5;
+      c.brake = this.vehicle.physics.forwardSpeed > 0.6 ? 0.5 : 0;
+      c.handbrake = true;
+      c.steer = 0;
     }
     if (this.started && !this.player.driving && a.interact && !this.player.busy) this.contextInteract();
 
@@ -688,23 +728,17 @@ export class Game {
     }
     if (d.pressed('KeyG') && h.held) {
       this.desktopHolding = false;
-      this.camera.getWorldDirection(_v);
-      this.interaction.throwFromHand(h, _v.multiplyScalar(9).add(new THREE.Vector3(0, 2, 0)));
+      this.camera.getWorldDirection(_v).multiplyScalar(9);
+      _v.y += 2;
+      this.interaction.throwFromHand(h, _v);
     }
     h.gripHeld = this.desktopHolding;
     h.triggerDown = !menuOpen && d.mouseLeftDown && d.pointerLocked;
     h.triggerUp = !d.mouseLeft;
     h.triggerHeld = d.mouseLeft;
     h.triggerValue = d.mouseLeft ? 1 : 0;
-    // Blaster aims along the view on desktop.
-    this.blaster.aimOverride = this.isXR
-      ? null
-      : () => {
-          const origin = this.camera.getWorldPosition(new THREE.Vector3());
-          const dir = this.camera.getWorldDirection(new THREE.Vector3());
-          origin.addScaledVector(dir, 0.6);
-          return { origin, dir };
-        };
+    // Blaster aims along the view on desktop (only called outside XR).
+    this.blaster.aimOverride = this.deskAim;
   }
 
   /** A / E on foot: talk to MIKA, else select what the desktop ray points at. */
@@ -869,10 +903,10 @@ export class Game {
     const target = this.missionWorld.targetPosition(this.missions, _v);
     this.player.position(_v2);
     const near = !!target && Math.hypot(_v.x - _v2.x, _v.z - _v2.z) < 14;
-    this.markers.setBeacon(target ? _v.clone() : null, near);
+    this.markers.setBeacon(target, near); // copies x/y/z
     // Dashboard
     if (this.player.driving || this.vehicle.speed > 0.5) {
-      const tgt = target ? _v.clone() : null;
+      const tgt = target; // _v: consumed (and mutated) below before _v is reused
       const carPos = this.vehicle.worldPosition(_v2);
       this.vehicle.dashboard.update(dt, {
         speedKmh: this.vehicle.speedKmh,
@@ -949,7 +983,7 @@ export class Game {
       this.promptPanel.refresh();
     }
     // Place near what the prompt refers to (car door or MIKA), else in front of the player.
-    if (this.player.nearCarDoor()) this.vehicle.door.getAnchor(_v).add(new THREE.Vector3(0, 0.6, 0));
+    if (this.player.nearCarDoor()) this.vehicle.door.getAnchor(_v).y += 0.6;
     else _v.set(MISSION_GIVER.x, 2.0, MISSION_GIVER.z);
     this.promptPanel.mesh.position.copy(_v);
     this.rig.headWorld(_v2);
@@ -964,7 +998,7 @@ export class Game {
     // Show the wrist status only when the wrist is turned toward the face.
     this.watch.mesh.getWorldPosition(_v);
     this.rig.headWorld(_v2);
-    const n = new THREE.Vector3(0, 0, 1).transformDirection(this.watch.mesh.matrixWorld);
+    const n = _n.set(0, 0, 1).transformDirection(this.watch.mesh.matrixWorld);
     const toHead = _v2.sub(_v).normalize();
     this.watch.mesh.visible = n.dot(toHead) > 0.55 && !this.menu.open;
     this.watchTimer -= dt;
@@ -1109,7 +1143,28 @@ export class Game {
     this.audio.updateEngine(carPos, this.vehicle.speed, this.player.driving ? Math.max(c.throttle, c.brake * 0.5) : 0, this.player.driving || this.vehicle.speed > 1);
     this.audio.setHorn(this.hornOn && this.player.driving, carPos);
     this.rig.headWorld(_v2);
-    const sirens = this.police.sirenUnits(_v2).slice(0, 2).map((u) => new THREE.Vector3(u.car.x, 1.4, u.car.z));
+    // Two nearest police cars with sirens on (linear scan, no per-frame arrays/vectors).
+    let d0 = Infinity;
+    let d1 = Infinity;
+    let u0: PoliceCarUnit | null = null;
+    let u1: PoliceCarUnit | null = null;
+    for (const u of this.police.cars) {
+      if (u.state !== 'respond' && u.state !== 'pursue' && u.state !== 'search') continue;
+      const d = (u.car.x - _v2.x) ** 2 + (u.car.z - _v2.z) ** 2;
+      if (d < d0) {
+        d1 = d0;
+        u1 = u0;
+        d0 = d;
+        u0 = u;
+      } else if (d < d1) {
+        d1 = d;
+        u1 = u;
+      }
+    }
+    const sirens = this.sirenList;
+    sirens.length = 0;
+    if (u0) sirens.push(this.sirenPos[0].set(u0.car.x, 1.4, u0.car.z));
+    if (u1) sirens.push(this.sirenPos[1].set(u1.car.x, 1.4, u1.car.z));
     this.audio.updateSirens(sirens);
     this.audio.updateAmbience(dt, _v2);
   }
@@ -1152,7 +1207,8 @@ export class Game {
   }
 
   restartMission(): void {
-    this.wanted.clear();
+    // reset(), not clear(): restart / busted / load are not an escape ("따돌렸다" toast + chime).
+    this.wanted.reset();
     this.crimes.clearPending();
     this.police.resetAll();
     this.missionWorld.resetAll();
@@ -1172,7 +1228,7 @@ export class Game {
     this.toast(`체포되었습니다! 벌금 -$${fine}`, 'bad', 5);
     this.bus.emit('player:busted', { fine });
     this.missions.handle({ type: 'busted' });
-    this.wanted.clear();
+    this.wanted.reset();
     this.crimes.clearPending();
     this.police.resetAll();
     const s = SPAWNS.precinct;
@@ -1227,11 +1283,13 @@ export class Game {
   /** Applies save data to the running world (start / load). */
   private applySave(data: SaveData, initial: boolean): void {
     this.settings = sanitizeSettings(data.settings);
+    this.seatedCalibPending = this.settings.comfort.stance === 'seated' && this.settings.comfort.heightOffset === 0;
     this.money = data.money;
     this.missions.active = null;
+    this.missions.lastFailure = null; // a failure from before the load is not restartable
     this.missionWorld.resetAll();
     this.missions.restoreCompleted(data.completedMissions);
-    this.wanted.clear();
+    this.wanted.reset();
     this.crimes.clearPending();
     this.police.resetAll();
     let [x, , z] = data.player.position;
@@ -1264,8 +1322,17 @@ export class Game {
 
   changeSettings(fn: (s: Settings) => void): void {
     const prevHand = this.settings.comfort.dominantHand;
+    const prevStance = this.settings.comfort.stance;
     fn(this.settings);
     this.settings = sanitizeSettings(this.settings);
+    if (prevStance !== this.settings.comfort.stance) {
+      // Seated: calibrate the eye height on the next tracked XR frame. Standing: no offset.
+      if (this.settings.comfort.stance === 'seated') this.seatedCalibPending = true;
+      else {
+        this.settings.comfort.heightOffset = 0;
+        this.seatedCalibPending = false;
+      }
+    }
     this.applySettings();
     if (prevHand !== this.settings.comfort.dominantHand) this.onXRHandsChanged();
     this.settingsSaveTimer = 2;
@@ -1274,7 +1341,7 @@ export class Game {
   private applySettings(): void {
     const s = this.settings;
     this.overlay.level = s.comfort.vignette;
-    this.rig.setHeightOffset(s.comfort.heightOffset);
+    this.rig.setHeightOffset(this.isXR ? s.comfort.heightOffset : 0);
     this.audio.applySettings(s.audio);
     this.env.setQuality(s.graphics.quality, this.renderer);
     this.vehicle.wheelGrab.enabled = s.comfort.wheelGrabSteering && !!this.player?.driving;
@@ -1341,6 +1408,8 @@ export class Game {
     }
     const tracked = this.rig.trackedHeadHeight();
     this.changeSettings((s) => (s.comfort.heightOffset = Math.round((tuning.player.calibratedEyeHeight - tracked) * 100) / 100));
+    // The seat calibration includes the old offset: re-capture it or the head jumps by the change.
+    if (this.player.driving) this.player.recenter();
     this.toast(`키 보정 완료 (${this.settings.comfort.heightOffset >= 0 ? '+' : ''}${this.settings.comfort.heightOffset.toFixed(2)}m)`, 'good');
   }
 

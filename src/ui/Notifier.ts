@@ -18,10 +18,13 @@ const KIND_COLOR: Record<ToastKind, string> = {
 const _head = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 const _target = new THREE.Vector3();
+const _rig = new THREE.Vector3();
 
 /**
  * Short notifications. VR: a small panel that lazily follows the head below
  * the line of sight (never locked to the face). Desktop: DOM toasts.
+ * Translation of the player rig (driving, locomotion) is carried 1:1 so the
+ * lazy follow only chases head motion and never trails behind a moving car.
  */
 export class Notifier {
   private readonly toasts: Toast[] = [];
@@ -29,6 +32,9 @@ export class Notifier {
   private readonly dom: HTMLElement | null;
   private initialised = false;
   xr = false;
+  /** Tracking-origin root whose translation the panel rides with. Defaults to camera -> trackingSpace -> rig. */
+  rigRoot: THREE.Object3D | null = null;
+  private readonly lastRig = new THREE.Vector3();
 
   constructor(
     scene: THREE.Scene,
@@ -94,6 +100,12 @@ export class Notifier {
     _target.copy(_head).addScaledVector(_fwd, 1.1);
     _target.y = _head.y - 0.3;
     const m = this.panel.mesh;
+    const root = this.rigRoot ?? this.camera.parent?.parent ?? null;
+    if (root) {
+      root.getWorldPosition(_rig);
+      if (this.initialised) m.position.add(_rig).sub(this.lastRig);
+      this.lastRig.copy(_rig);
+    }
     if (!this.initialised || m.position.distanceTo(_target) > 1.2) {
       m.position.copy(_target);
       this.initialised = true;

@@ -24,6 +24,7 @@ export interface ObjectiveDef {
   /** Player-facing objective text (Korean). */
   text: string;
   zone?: string;
+  /** pickup_item / deliver_item target; on reach_zone the player must also carry it. */
   item?: string;
   socket?: string;
   vehicle?: string;

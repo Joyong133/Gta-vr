@@ -150,6 +150,11 @@ export class MissionWorld implements MissionContext {
     if (!o) return null;
     switch (o.type) {
       case 'reach_zone': {
+        // Zone that needs an item the player dropped: lead back to the item first.
+        if (o.item && !this.itemCollected(o.item)) {
+          const it = this.items.get(o.item);
+          if (it?.enabled) return out.copy(it.object.position);
+        }
         const z = o.zone ? zoneById(o.zone) : undefined;
         return z ? out.set(z.x, 0, z.z) : null;
       }
