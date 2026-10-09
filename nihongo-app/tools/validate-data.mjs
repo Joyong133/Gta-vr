@@ -121,6 +121,14 @@ for (const lv of D.levels) {
   }
 }
 
+// 한자 중복(레벨 전체) 경고
+{
+  const seenK = new Map();
+  for (const lv of D.levels) for (const u of lv.units) for (const k of u.kanji || []) {
+    if (seenK.has(k[0])) warn('kanji', `duplicate kanji ${k[0]} (${seenK.get(k[0])} & ${u.id})`);
+    else seenK.set(k[0], u.id);
+  }
+}
 // 중복 단어(같은 레벨 내) 경고
 for (const lv of D.levels) {
   const seen = new Map();
