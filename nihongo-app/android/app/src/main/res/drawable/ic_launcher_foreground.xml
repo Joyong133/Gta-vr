@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 「日」 글자를 사각형 조합으로 그린 로고 + 벚꽃 점 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M37,31h34v46h-34z M43,37v12h22v-12z M43,55v16h22v-16z" />
+    <path
+        android:fillColor="#FFFFD34E"
+        android:pathData="M78,27m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
+</vector>

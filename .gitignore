@@ -5,3 +5,8 @@ dist/
 node_modules/
 test-results/
 tests/e2e/out/
+nihongo-app/android/.gradle/
+nihongo-app/android/build/
+nihongo-app/android/app/build/
+nihongo-app/android/local.properties
+nihongo-app/tests/out/

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#F5F6FB</color>
+    <color name="nav">#FFFFFF</color>
+    <color name="icon_start">#5B6CF9</color>
+    <color name="icon_end">#E86A92</color>
+</resources>

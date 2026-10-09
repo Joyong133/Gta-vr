@@ -1,0 +1,97 @@
+# 일본어 마스터 안드로이드 APK 빌드 → GitHub Release에 업로드
+# 휴대폰에서 Releases 페이지의 nihongo-master.apk 를 받아 설치하면 됩니다.
+name: Nihongo Master APK
+
+on:
+  push:
+    paths:
+      - 'nihongo-app/**'
+      - '.github/workflows/nihongo-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nihongo-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate learning data
+        run: node nihongo-app/tools/validate-data.mjs
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Prepare signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.NIHONGO_KEYSTORE_B64 }}
+        run: |
+          # 저장소 비밀값(NIHONGO_KEYSTORE_B64)이 있으면 그 키로, 없으면 저장소에 포함된 개인용 키로 서명
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build release APK
+        working-directory: nihongo-app/android
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          KEYSTORE_PASSWORD: ${{ secrets.NIHONGO_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.NIHONGO_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.NIHONGO_KEY_PASSWORD }}
+        run: |
+          [ -z "$KEYSTORE_PASSWORD" ] && unset KEYSTORE_PASSWORD
+          [ -z "$KEY_ALIAS" ] && unset KEY_ALIAS
+          [ -z "$KEY_PASSWORD" ] && unset KEY_PASSWORD
+          gradle assembleRelease --no-daemon --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/nihongo-master.apk"
+          ls -la "$GITHUB_WORKSPACE/nihongo-master.apk"
+
+      - name: Verify APK contents
+        run: |
+          unzip -l nihongo-master.apk | grep -E "assets/index.html|assets/data/n5.js|classes.dex"
+          "$ANDROID_HOME"/build-tools/$(ls "$ANDROID_HOME"/build-tools | sort -V | tail -1)/apksigner verify --print-certs nihongo-master.apk | head -5
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nihongo-master-apk
+          path: nihongo-master.apk
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nihongo-v1.0.${{ github.run_number }}
+          name: 일본어 마스터 v1.0.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          files: nihongo-master.apk
+          body: |
+            ## 📱 설치 방법
+            1. 휴대폰에서 아래 **nihongo-master.apk** 를 눌러 다운로드
+            2. 다운로드 완료 알림을 눌러 설치 (처음이면 "출처를 알 수 없는 앱 설치 허용" 필요)
+            3. 이전 버전이 설치되어 있으면 그대로 업데이트되고 학습 기록은 유지돼요
+
+            ## ✨ 주요 기능
+            - 📘 체계 코스: 문자 → N5 → N4 → N3 → N2 → N1 단원별 문법 강의·단어·한자·회화·독해·단원 테스트
+            - 🎮 챌린지 로드: 하트·XP·스트릭·리그·업적이 있는 게임식 레슨 (듣기·문장 조립·짝 맞추기·말하기)
+            - 🔁 SRS 플래시카드 복습, 오답 노트, 즐겨찾기
+            - 📝 JLPT 모의고사 (문자·어휘 / 문법 / 독해 / 청해, 180점 환산)
+            - 🧘 집중 모드(뽀모도로 + 배경 소리), 50음도·쓰기 연습, 사전 검색, 학습 통계, 매일 학습 알림
+
+            커밋: ${{ github.sha }}

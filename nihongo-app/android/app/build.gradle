@@ -1,0 +1,54 @@
+plugins {
+    id 'com.android.application'
+}
+
+// CI에서는 실행 번호를 버전 코드로 사용 → 새 APK가 기존 앱 위에 업데이트 설치됨
+def ciVersionCode = (System.getenv('VERSION_CODE') ?: '1') as int
+def ksFile = System.getenv('KEYSTORE_FILE') ?: "${rootDir}/keystore/nihongo-release.jks"
+
+android {
+    namespace 'com.joyong.nihongo'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.joyong.nihongo'
+        minSdk 24
+        targetSdk 35
+        versionCode ciVersionCode
+        versionName "1.0.${ciVersionCode}"
+    }
+
+    signingConfigs {
+        release {
+            storeFile file(ksFile)
+            storePassword System.getenv('KEYSTORE_PASSWORD') ?: 'nihongo-master'
+            keyAlias System.getenv('KEY_ALIAS') ?: 'nihongo'
+            keyPassword System.getenv('KEY_PASSWORD') ?: 'nihongo-master'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+        debug {
+            applicationIdSuffix '.debug'
+        }
+    }
+
+    sourceSets {
+        // 웹 학습 화면(nihongo-app/web)을 그대로 assets로 포함
+        main.assets.srcDirs += ['../../web']
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}

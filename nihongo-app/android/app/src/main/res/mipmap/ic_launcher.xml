@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 7.x 용 런처 아이콘 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FF6A63F7"
+        android:pathData="M24,4h60a20,20 0,0 1,20 20v60a20,20 0,0 1,-20 20h-60a20,20 0,0 1,-20 -20v-60a20,20 0,0 1,20 -20z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M37,31h34v46h-34z M43,37v12h22v-12z M43,55v16h22v-16z" />
+    <path
+        android:fillColor="#FFFFD34E"
+        android:pathData="M78,27m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
+</vector>
