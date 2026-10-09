@@ -26,8 +26,10 @@ jobs:
         with:
           node-version: 22
 
-      - name: Validate learning data
-        run: node nihongo-app/tools/validate-data.mjs
+      - name: Validate learning data and scripts
+        run: |
+          node nihongo-app/tools/validate-data.mjs
+          for f in nihongo-app/web/js/*.js nihongo-app/web/js/screens/*.js nihongo-app/web/data/*.js; do node --check "$f"; done
 
       - uses: actions/setup-java@v4
         with:

@@ -102,7 +102,7 @@
         keys.map((k, i) => h('div.wc-col',
           h('div.wc-val', String(xs[i])),
           h('div.wc-bar' + (xs[i] >= st.profile.goalXp ? '.hit' : ''), { style: { height: Math.max(2, Math.round((xs[i] / maxX) * 100)) + '%' } })))),
-      h('div.wc-labels', keys.map((k, i) => h('div.wc-lab', h('div.wc-day', DAYN[util.parseDay(k).getDay()]), h('div.wc-min', mins[i] ? `${mins[i]}분` : '')))));
+      h('div.wc-labels', keys.map((k, i) => h('div.wc-lab', h('div.wc-day', DAYN[util.parseDay(k).getDay()]), h('div.wc-min', mins[i] ? `${mins[i]}분` : ''))))));
 
     el.appendChild(h('div.section-title', '학습 잔디 (최근 16주)'));
     const grid = h('div.heat');
