@@ -90,6 +90,8 @@
     return parts;
   }
 
+  App.examBuild = (id) => makeExam(App.C.levelById[id]);
+
   function runExam(id) {
     const lv = App.C.levelById[id];
     const parts = makeExam(lv);

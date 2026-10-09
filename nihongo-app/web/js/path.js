@@ -10,7 +10,7 @@ App.path = (function () {
     const out = [];
     for (let i = 0; i < arr.length; i += k) out.push(arr.slice(i, i + k));
     // 마지막 묶음이 너무 작으면 앞 묶음에 합침
-    if (out.length > 1 && out[out.length - 1].length < Math.ceil(k / 2)) out[out.length - 2].push(...out.pop());
+    if (out.length > 1 && out[out.length - 1].length <= k / 2) out[out.length - 2].push(...out.pop());
     return out;
   };
 

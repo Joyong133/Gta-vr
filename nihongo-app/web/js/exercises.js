@@ -90,7 +90,8 @@ App.ex = (function () {
       };
     },
     vocabWord(v, pool) {
-      const ds = distract(pool, v, (x) => x.w + x.r, 3, App.C.all.v).filter((x) => x.m !== v.m);
+      const notSame = (x) => x.m !== v.m && x.w !== v.w;
+      const ds = distract(pool.filter(notSame), v, (x) => x.w, 3, App.C.all.v.filter(notSame));
       return {
         kind: 'choice', title: T.word, item: v.id, tts: v.r,
         q: { html: `<span class="ko-q">${util.esc(v.m)}</span>`, big: true },
@@ -348,6 +349,9 @@ App.ex = (function () {
           sent.push(r < 0.45 ? gen.buildJa(s, pool) : r < 0.75 ? gen.buildKo(s, pool) : gen.sentMeaning(s, pool));
         }
       }
+      if (quiz.length + sent.length < 8) {
+        for (const s of util.sample(unit._sent.filter((x) => x.src !== 'talk'), 8)) sent.push(gen.sentMeaning(s, pool) || gen.buildJa(s, pool));
+      }
       const q = util.shuffle(quiz.filter(Boolean));
       const sn = util.shuffle(sent.filter(Boolean));
       const list = [];
@@ -360,12 +364,20 @@ App.ex = (function () {
     sentences(ss, unit, max = 12) {
       const pool = unit.level._sent;
       const out = [];
-      util.shuffle(ss).forEach((s, i) => {
-        const opts = [gen.buildJa(s, pool, true), gen.buildKo(s, pool), gen.sentMeaning(s, pool), gen.buildJa(s, pool)];
-        if (i % 3 === 0) opts.unshift(gen.speak(s));
-        out.push(opts[i % opts.length] || opts.find(Boolean));
-      });
-      return compose(out, max);
+      const list = util.shuffle(ss);
+      const target = Math.min(max, Math.max(8, list.length * 2));
+      const makers = [
+        (s) => gen.buildJa(s, pool, true), (s) => gen.buildKo(s, pool), (s) => gen.sentMeaning(s, pool),
+        (s) => gen.buildJa(s, pool), (s) => gen.speak(s),
+      ];
+      let i = 0, guard = 0;
+      while (out.length < target && guard++ < target * 6 && list.length) {
+        const s = list[i % list.length];
+        const e = makers[(i + Math.floor(i / list.length)) % makers.length](s);
+        if (e) out.push(e);
+        i++;
+      }
+      return out;
     },
     review(unit, max = 16) {
       const parts = [];
