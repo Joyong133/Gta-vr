@@ -765,3 +765,4 @@ body.full #focus-pill { bottom: 96px; }
   .tool-grid, .stat-grid, .new-grid { grid-template-columns: repeat(2, 1fr); }
   .ex-q.big .q-main { font-size: 28px; }
 }
+.row.gap.wrap > .btn.grow { padding-left: 8px; padding-right: 8px; font-size: 14px; }
