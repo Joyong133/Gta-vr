@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.join(here, '..', 'web', 'data');
-const order = ['kana.js', 'n5.js', 'n4.js', 'n3.js', 'n2.js', 'n1.js', 'vocab-plus.js', 'extra.js'];
+const order = ['kana.js', 'n5.js', 'n4.js', 'n3.js', 'n2.js', 'n1.js', 'vocab-plus.js', 'vocab-plus2.js', 'extra.js', 'verbs.js', 'particles.js', 'compare.js', 'phrases.js'];
 
 const ctx = { window: {} };
 vm.createContext(ctx);
@@ -139,8 +139,108 @@ for (const lv of D.levels) {
   }
 }
 
+/* ───────── 트레이닝 데이터 ───────── */
+const KANA_ONLY = /^[ぁ-ゖァ-ヺー]+$/;
+// 표기의 가나 부분이 읽기와 맞는지 (후리가나 자동 정렬이 되는지)
+function aligns(w, r) {
+  const segs = w.match(/[一-鿿々〆ヵヶ]+|[^一-鿿々〆ヵヶ]+/g) || [];
+  const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp('^' + segs.map((x) => (/[一-鿿々]/.test(x) ? '(.+?)' : esc(x))).join('') + '$');
+  return re.test(r);
+}
+const IE_ROW = /[いきぎしじちぢにひびぴみりえけげせぜてでねへべぺめれ]る$/;
+const tstats = { verbs: 0, adjs: 0, particles: 0, ptcQuiz: 0, compare: 0, cmpQuiz: 0, phrases: 0, situations: 0 };
+{
+  const seen = new Set();
+  for (const [i, v] of (D.verbs || []).entries()) {
+    tstats.verbs++;
+    const W = `verbs/${i}:${v[0]}`;
+    if (v.length < 5) { err(W, 'bad verb entry'); continue; }
+    const [w, r, m, g, lv] = v;
+    if (seen.has(w)) err(W, 'duplicate verb');
+    seen.add(w);
+    if (!KANA_ONLY.test(r)) err(W, `reading must be kana: ${r}`);
+    if (!m) err(W, 'missing meaning');
+    if (![1, 2, 3].includes(g)) err(W, 'group must be 1/2/3');
+    if (!['n5', 'n4', 'n3', 'n2', 'n1'].includes(lv)) err(W, 'bad level');
+    if (w.slice(-1) !== r.slice(-1)) err(W, 'word and reading must share the last kana');
+    if (g === 2 && !IE_ROW.test(r)) err(W, 'group 2 verb must end in -iru/-eru');
+    if (g === 3 && !/(する|くる)$/.test(r)) err(W, 'group 3 verb must end in する/来る');
+    if (g === 1 && !/[うくぐすつぬぶむる]$/.test(r)) err(W, 'group 1 verb must end in u-row kana');
+    if (!aligns(w, r)) err(W, `reading does not align with kana in word: ${w} / ${r}`);
+  }
+  const seenA = new Set();
+  for (const [i, a] of (D.adjs || []).entries()) {
+    tstats.adjs++;
+    const W = `adjs/${i}:${a[0]}`;
+    const [w, r, m, t, lv] = a;
+    if (seenA.has(w)) err(W, 'duplicate adjective');
+    seenA.add(w);
+    if (!KANA_ONLY.test(r)) err(W, `reading must be kana: ${r}`);
+    if (!m || !['i', 'na'].includes(t) || !lv) err(W, 'bad adjective entry');
+    if (t === 'i' && !/い$/.test(r)) err(W, 'i-adjective must end in い');
+    if (!aligns(w, r)) err(W, `reading does not align: ${w} / ${r}`);
+  }
+  for (const P of D.particles || []) {
+    tstats.particles++;
+    const W = `particles/${P.p}`;
+    if (!P.p || !P.name || !P.sum || !P.lv) err(W, 'missing fields');
+    for (const [j, u] of (P.uses || []).entries()) {
+      if (u.length !== 4) err(`${W}/use${j}`, 'bad use');
+      else checkJp(`${W}/use${j}`, u[2]);
+    }
+    for (const [j, q] of (P.q || []).entries()) {
+      tstats.ptcQuiz++;
+      const Q = `${W}/q${j}`;
+      const [stem, ans, ko, wr] = q;
+      if ((stem.match(/（　）/g) || []).length !== 1) err(Q, `need exactly one blank: ${stem}`);
+      checkJp(Q, stem);
+      if (!ans || !ko) err(Q, 'missing answer/translation');
+      const ws = String(wr || '').split(',').filter(Boolean);
+      if (ws.length !== 3) err(Q, `need 3 distractors: ${wr}`);
+      if (ws.includes(ans) || new Set(ws).size !== ws.length) err(Q, `distractor clash: ${ans} / ${wr}`);
+    }
+    if ((P.q || []).length < 2) warn(W, 'fewer than 2 quizzes');
+  }
+  const ids = new Set();
+  for (const T of D.compare || []) {
+    tstats.compare++;
+    const W = `compare/${T.id}`;
+    if (ids.has(T.id)) err(W, 'duplicate id');
+    ids.add(T.id);
+    if (!T.t || !T.sum || !T.rows?.length || !T.ex?.length || !T.q?.length) err(W, 'missing fields');
+    for (const [j, e] of (T.ex || []).entries()) checkJp(`${W}/ex${j}`, e[0]);
+    for (const [j, q] of (T.q || []).entries()) {
+      tstats.cmpQuiz++;
+      const Q = `${W}/q${j}`;
+      const [stem, opts, ans, expl] = q;
+      if ((stem.match(/（　）/g) || []).length !== 1) err(Q, `need exactly one blank: ${stem}`);
+      checkJp(Q, stem);
+      if (!Array.isArray(opts) || opts.length !== 4 || new Set(opts).size !== 4) err(Q, `need 4 distinct options: ${opts}`);
+      else opts.forEach((o, k) => checkJp(`${Q}/opt${k}`, o));
+      if (!(ans >= 0 && ans < 4)) err(Q, 'answer out of range');
+      if (!expl) err(Q, 'missing explanation');
+    }
+    for (const [j, p] of (T.pairs || []).entries()) if (p.length !== 3) err(`${W}/pair${j}`, 'pair needs 3 columns');
+  }
+  const pseen = new Set();
+  for (const sit of D.phrases || []) {
+    tstats.situations++;
+    const W = `phrases/${sit.id}`;
+    if (!sit.id || !sit.t || !sit.icon || !sit.p?.length) err(W, 'missing fields');
+    for (const [j, p] of (sit.p || []).entries()) {
+      tstats.phrases++;
+      checkJp(`${W}/${j}`, p[0], { requireRuby: true });
+      if (!p[1]) err(`${W}/${j}`, 'missing translation');
+      if (pseen.has(p[0])) warn(`${W}/${j}`, `duplicate phrase ${p[0]}`);
+      pseen.add(p[0]);
+    }
+  }
+}
+
 const total = Object.values(stats).reduce((a, s) => { for (const k in s) a[k] = (a[k] || 0) + s[k]; return a; }, {});
 console.table({ ...stats, TOTAL: total });
+console.table(tstats);
 if (warns.length) {
   console.log(`\n${warns.length} warning(s):`);
   for (const w of warns.slice(0, process.env.ALLW ? 9999 : 40)) console.log('  ⚠ ' + w);

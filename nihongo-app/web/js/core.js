@@ -144,6 +144,8 @@ App.jp = {
     const esc = App.util.esc(App.jp.dropSpaces(String(s)));
     return esc.replace(RUBY_RE, '<ruby>$1<rt>$2</rt></ruby>');
   },
+  // HTML이 섞인 설명문용 (이스케이프하지 않음 — 앱 내부 문자열에만 사용)
+  rubyRaw(s) { return App.jp.dropSpaces(String(s || '')).replace(RUBY_RE, '<ruby>$1<rt>$2</rt></ruby>'); },
   plain(s) { return App.jp.dropSpaces(String(s || '').replace(RUBY_RE, '$1')); },
   kana(s) { return App.jp.dropSpaces(String(s || '').replace(RUBY_RE, '$2')); },
   chunks(s) { return String(s).trim().split(/\s+/).filter(Boolean); },
@@ -156,6 +158,19 @@ App.jp = {
   isKanaOnly(s) { return /^[぀-ヿー・\s]+$/.test(s); },
   // 히라가나 ↔ 가타카나
   toHira(s) { return String(s).replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60)); },
+  // 표기와 읽기를 맞춰 후리가나 마크업 생성: 思い出す + おもいだす → 思[おも]い出[だ]す
+  align(word, reading) {
+    word = String(word || ''); reading = String(reading || '');
+    if (!/[㐀-鿿豈-﫿々〆ヵヶ]/.test(word) || !reading) return word;
+    const segs = word.match(/[㐀-鿿豈-﫿々〆ヵヶ]+|[^㐀-鿿豈-﫿々〆ヵヶ]+/g);
+    const isK = (s) => /[㐀-鿿豈-﫿々〆ヵヶ]/.test(s);
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('^' + segs.map((s) => (isK(s) ? '(.+?)' : esc(App.jp.toHira(s)))).join('') + '$');
+    const m = re.exec(App.jp.toHira(reading));
+    if (!m) return word;
+    let gi = 1;
+    return segs.map((s) => (isK(s) ? `${s}[${m[gi++]}]` : s)).join('');
+  },
   // 문자열 유사도 (발음 인식 채점용, 0..1)
   similarity(a, b) {
     a = App.jp.toHira(a); b = App.jp.toHira(b);
@@ -217,7 +232,9 @@ App.store = {
       exams: [],    // { level, score, max, pass, date, parts }
       ach: {},      // 업적 id → ts
       league: { week: '', tier: 0, xp: 0, seed: Math.floor(Math.random() * 1e9), last: null },
-      counters: { lessons: 0, perfect: 0, reviews: 0, focusSec: 0, speak: 0, exams: 0, chests: 0 },
+      counters: { lessons: 0, perfect: 0, reviews: 0, focusSec: 0, speak: 0, exams: 0, chests: 0, drills: 0, listen: 0 },
+      train: {},    // 트레이닝 기록: 'conj/te,ta/n5' → { n, best, ts }
+      plan: {},     // 오늘의 플랜 보상 수령일
       lastUnit: '', lastNode: '',
     };
   },

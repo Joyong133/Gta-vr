@@ -12,7 +12,19 @@
     el.appendChild(h('button.profile-card', { type: 'button', onclick: () => App.go('settings') },
       h('div.pc-avatar', st.profile.avatar), h('div.pc-body', h('div.pc-name', st.profile.name), h('div.small.muted', `총 ${st.xp.toLocaleString()} XP · 최고 연속 ${st.streak.best}일 · 목표 ${String(st.profile.target).toUpperCase()}`)), h('span', '⚙️')));
     const groups = [
+      ['트레이닝 센터', [
+        ['🔄', '동사 활용', 'ます·て·ない·가능·수동·사역 22가지', 'conj'],
+        ['🎨', '형용사 활용', 'い·な형용사 13가지 활용', 'adj'],
+        ['🧷', '조사 마스터', '용법 정리 + 빈칸 연습', 'particles'],
+        ['⚖️', '헷갈리는 문법', 'は/が, たら/ば/と/なら 등 비교', 'compare'],
+        ['🔢', '숫자·시간·날짜', '숫자 읽기·조수사·시각·날짜', 'numbers'],
+        ['🗣️', '상황별 회화', '식당·쇼핑·길 묻기·병원…', 'phrases'],
+        ['🎧', '청해 트레이닝', '받아쓰기·쉐도잉·연속 듣기', 'listen'],
+        ['🧭', '레벨 진단', '나에게 맞는 시작 레벨 찾기', 'placement'],
+      ]],
       ['학습', [
+        ['📒', '단어장', '레벨별 전체 단어·가리기 테스트', 'words'],
+        ['📑', '문법 색인', '레벨별 전체 문법 모아 보기', 'gindex'],
         ['📝', 'JLPT 모의고사', '실전처럼 시간 제한 시험', 'exam'],
         ['🧘', '집중 모드', '뽀모도로 타이머 + 배경 소리', 'focus'],
         ['🔎', '사전 검색', '단어·한자·문법 통합 검색', 'dict'],

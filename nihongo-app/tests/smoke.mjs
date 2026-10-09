@@ -204,6 +204,72 @@ await page.waitForTimeout(1200);
 await shot('f-running');
 await page.click('.focus-page .btn.ghost >> nth=1');
 
+step('training screens');
+for (const r of ['train', 'conj', 'adj', 'numbers', 'particles', 'compare', 'phrases', 'phrases/restaurant', 'listen', 'shadow/n5', 'playlist/lv/n5', 'words/n5', 'gindex/n4', 'home', 'more']) {
+  await go(r);
+  await page.waitForTimeout(100);
+  await shot('tr-' + r.replace(/\//g, '_'));
+}
+step('training details');
+await go('conj');
+await page.click('.gcard .g-head >> nth=1');
+await page.waitForTimeout(150);
+await shot('tr-conj-form');
+await page.click('.irow >> nth=0');
+await page.waitForTimeout(250);
+await shot('tr-conj-table');
+await page.evaluate(() => App.ui.closeTop());
+await go('compare');
+await page.click('.gcard .g-head >> nth=0');
+await shot('tr-compare-open');
+await go('numbers');
+await page.fill('.search', '3680');
+await page.waitForTimeout(100);
+await shot('tr-numbers-conv');
+await go('words/n5');
+await page.click('.seg-btn >> text=뜻 가리기');
+await shot('tr-words-hide');
+await go('dict');
+await page.fill('.search', '食べる');
+await page.waitForTimeout(300);
+await page.click('.irow >> nth=0');
+await page.waitForTimeout(250);
+await shot('tr-vocab-related');
+await page.evaluate(() => App.ui.closeTop());
+
+step('training drills');
+for (const r of ['drill/conj/auto/n4', 'drill/conj/te,ta/n5', 'drill/vgroup/n5', 'drill/adj/auto/n5', 'drill/atype/n5', 'drill/num/mix', 'drill/num/counter', 'drill/ptc/all/n5', 'drill/ptc/に', 'drill/cmp/tara-ba', 'drill/cmp/all/n4', 'drill/phr/restaurant', 'drill/lis/mix/n5', 'drill/gq/n5', 'drill/conjv/食べる']) {
+  await go('lesson/' + r);
+  await page.waitForTimeout(150);
+  await shot('dr-' + r.replace(/[\/,]/g, '_'));
+  const ok = await playLesson({ correct: true });
+  if (!ok) throw new Error('drill did not finish: ' + r);
+  if (await page.$('.modal .celebrate')) { await page.click('.modal .btn.primary'); await page.waitForTimeout(250); }
+  await page.click('.result .btn.primary');
+  await page.waitForTimeout(150);
+}
+await go('words/n5');
+await page.click('.btn >> text=이 목록 퀴즈');
+await page.waitForTimeout(200);
+if (!(await playLesson({ correct: true }))) throw new Error('word list quiz did not finish');
+await page.click('.result .btn.primary');
+
+step('placement');
+await go('placement');
+await page.waitForTimeout(150);
+await shot('pl-intro');
+await page.click('.result .btn.primary');
+await page.waitForTimeout(150);
+await shot('pl-q');
+if (!(await playLesson({ correct: true, max: 120 }))) throw new Error('placement did not finish');
+await shot('pl-result');
+await page.click('.result .btn.primary');
+await page.waitForTimeout(200);
+await go('home');
+await shot('tr-home-after');
+const plan = await page.evaluate(() => App.$$('.plan-item.done').length);
+console.log('  plan items done:', plan);
+
 step('dict search');
 await go('dict');
 await page.fill('.search', '먹');

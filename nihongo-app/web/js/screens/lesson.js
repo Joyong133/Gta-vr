@@ -4,7 +4,7 @@
 (function () {
   const { h, util, jp } = App;
 
-  function setup(mode, id) {
+  function setup(mode, id, rest = []) {
     const S = App.store.state;
     const B = App.ex.build;
     switch (mode) {
@@ -56,18 +56,27 @@
         if (!ids.length) return { empty: true };
         return { title: '즐겨찾기 퀴즈', list: B.fromItems(ids, 15), requeue: true, xp: 8 };
       }
+      case 'drill': {
+        const fn = App.drills[id];
+        if (!fn) return null;
+        const r = fn(rest);
+        if (!r) return null;
+        if (r.empty) return { empty: true, msg: r.msg };
+        return Object.assign({ requeue: true, xp: 10, drill: [id].concat(rest).join('/') }, r);
+      }
       default: return null;
     }
   }
 
   App.screens.lesson = function (args) {
-    const [mode, id] = args;
-    const cfg = setup(mode, id);
+    const [mode, id, ...rest] = args;
+    const cfg = setup(mode, id, rest);
+    const again = 'lesson/' + args.map(encodeURIComponent).join('/');
     const wrap = h('div.lesson');
     const scr = { el: wrap, full: true, study: true };
 
     if (!cfg || cfg.empty || (cfg.list && !cfg.list.length)) {
-      wrap.append(h('div.pad', App.ui.empty('📭', cfg && cfg.empty ? '복습할 항목이 아직 없어요. 먼저 레슨을 학습해 보세요!' : '레슨을 불러오지 못했어요.',
+      wrap.append(h('div.pad', App.ui.empty('📭', cfg && cfg.empty ? (cfg.msg || '복습할 항목이 아직 없어요. 먼저 레슨을 학습해 보세요!') : '레슨을 불러오지 못했어요.',
         h('button.btn.primary', { type: 'button', onclick: () => App.back() }, '돌아가기'))));
       return scr;
     }
@@ -85,9 +94,20 @@
     const progress = App.ui.bar(0, 'lesson-bar');
     const heartEl = h('div.lesson-hearts');
     const comboEl = h('div.combo');
+    const furiBtn = h('button.icon-btn.furi-toggle', { type: 'button', 'aria-label': '후리가나 켜기/끄기', title: '후리가나', lang: 'ja' }, 'ふ');
+    const syncFuri = () => furiBtn.classList.toggle('off', !App.store.state.settings.furigana);
+    furiBtn.addEventListener('click', () => {
+      const st = App.store.state.settings;
+      st.furigana = !st.furigana;
+      App.store.save();
+      App.applyTheme();
+      syncFuri();
+      App.ui.toast(st.furigana ? '후리가나를 표시해요' : '후리가나를 숨겨요 (실전 연습)');
+    });
+    syncFuri();
     const head = h('div.lesson-head',
       h('button.icon-btn', { type: 'button', 'aria-label': '나가기', onclick: () => App.back() }, '✕'),
-      progress, cfg.hearts ? heartEl : comboEl);
+      progress, furiBtn, cfg.hearts ? heartEl : comboEl);
     const mount = h('div.ex-mount');
     const checkBtn = h('button.btn.primary.block.check', { type: 'button', disabled: true }, '확인');
     const skipBtn = h('button.btn.ghost.skip', { type: 'button' }, '건너뛰기');
@@ -324,10 +344,18 @@
         p.best = Math.max(p.best, acc);
         p.ts = Date.now();
         S.lastNode = cfg.node.id;
+        const td = App.game.today();
+        td.nodes = (td.nodes || 0) + 1;
         gems += p.n === 1 ? 5 : 1;
         App.srs.addMany(App.path.itemsOf(cfg.node));
       }
       if (cfg.heal) { App.game.gainHeart(1); notes.push('❤️ 하트 1개 회복'); }
+      if (cfg.drill) {
+        const prev = App.train.rec(cfg.drill);
+        App.train.record(cfg.drill, acc);
+        if (prev && acc > prev.best) notes.push(`📈 최고 기록 갱신! ${prev.best}% → ${acc}%`);
+        if (cfg.onFinish) try { cfg.onFinish(acc); } catch (e) { console.error(e); }
+      }
       S.counters.lessons++;
       App.game.today().lessons++;
       S.gems += gems;
@@ -355,8 +383,8 @@
           state.wrongList.map(({ ex, correctHtml }) => h('div.wr-item', h('div.wr-title', ex.title), ex.q && ex.q.html ? h('div.wr-q', { html: ex.q.html }) : null, h('div.wr-a', { html: '정답: ' + (correctHtml || '') }), ex.explain ? h('div.wr-ex.small', { html: ex.explain }) : null))) : null,
         h('div.col.gap',
           h('button.btn.primary.block', { type: 'button', onclick: () => App.leave() }, '계속하기'),
-          cfg.test && !passed ? h('button.btn.ghost.block', { type: 'button', onclick: () => App.go(`lesson/${mode}/${id}`, true) }, '다시 도전') : null,
-          cfg.node && cfg.node.type !== 'guide' && cfg.node.type !== 'read' ? h('button.btn.ghost.block', { type: 'button', onclick: () => App.go(`lesson/${mode}/${id}`, true) }, '한 번 더 연습') : null),
+          cfg.test && !passed ? h('button.btn.ghost.block', { type: 'button', onclick: () => App.go(again, true) }, '다시 도전') : null,
+          (cfg.node && cfg.node.type !== 'guide' && cfg.node.type !== 'read') || cfg.drill ? h('button.btn.ghost.block', { type: 'button', onclick: () => App.go(again, true) }, '🔁 한 번 더 연습') : null),
       );
       mount.appendChild(res);
       scr.onBack = null;

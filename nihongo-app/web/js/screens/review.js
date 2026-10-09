@@ -119,6 +119,8 @@
       if (lv) { ids = lv._vocab.concat(lv._kanji).filter((x) => !App.srs.has(x.id)).slice(0, 20).map((x) => x.id); learn = true; title = `${lv.name} 새 카드`; }
     } else if (mode === 'marks') {
       ids = util.shuffle(Object.keys(st.marks)); learn = true; title = '즐겨찾기 카드';
+    } else if (mode === 'list') {
+      ids = (App._listIds || []).slice(0, 60); learn = true; title = App._listTitle || '단어장 카드';
     }
     ids = ids.filter((x) => App.C.items[x]);
     const el = h('div.cards-page');

@@ -437,7 +437,7 @@ App.ex = (function () {
   function renderQ(q) {
     const box = h('div.ex-q' + (q.big ? '.big' : ''));
     if (q.audio && (q.hideText || canListen())) {
-      const row = h('div.audio-row', audioBtn(q.audio, !!q.hideText), q.hideText ? audioBtn(q.audio, false, true) : null);
+      const row = h('div.audio-row', audioBtn(q.audio, !!q.hideText), audioBtn(q.audio, false, true));
       box.appendChild(row);
     }
     if (!q.hideText && q.html) box.appendChild(h('div.q-main', { html: q.html }));

@@ -109,7 +109,13 @@
     const show = (t) => {
       tab = t;
       lastTab[u.id] = t;
-      if (t !== 'test') { c.seen[t] = true; App.store.save(); }
+      if (t !== 'test') {
+        c.seen[t] = true;
+        const td = App.game.today();
+        td.cu = td.cu || {};
+        td.cu[u.id + ':' + t] = 1;
+        App.store.save();
+      }
       App.$$('.tb', tabBar).forEach((b) => b.classList.toggle('on', b.dataset.t === t));
       body.innerHTML = '';
       const fn = TABS[t];

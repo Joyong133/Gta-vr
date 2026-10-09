@@ -31,7 +31,7 @@ const report = await page.evaluate(() => {
       const labels = ex.opts.map((o) => o.html);
       if (new Set(labels).size !== labels.length) problems.push(`${where}: duplicate option labels ${labels.join(' | ')}`);
       if (!vals.includes(String(ex.ans))) problems.push(`${where}: answer not in options`);
-      if (ex.opts.length < 4 && ex.kind === 'choice') problems.push(`${where}: only ${ex.opts.length} options (${ex.title})`);
+      if (ex.opts.length < 4 && !ex.fewOk) problems.push(`${where}: only ${ex.opts.length} options (${ex.title})`);
     } else if (ex.kind === 'build') {
       const tiles = ex.tiles.map((t) => t.val);
       for (const a of ex.ans) {
@@ -74,10 +74,37 @@ const report = await page.evaluate(() => {
       p.list.forEach((ex, i) => checkEx(`exam ${id}/${p.name}#${i}`, ex));
     }
   }
+  // 트레이닝 센터 연습 생성기
+  const drillArgs = [];
+  for (const lv of ['n5', 'n4', 'n3']) {
+    drillArgs.push(['conj', 'auto', lv], ['vgroup', lv], ['adj', 'auto', lv], ['atype', lv], ['ptc', 'all', lv]);
+    for (const [k] of App.conj.FORMS) drillArgs.push(['conj', k, lv]);
+    for (const [k] of App.conj.AFORMS) drillArgs.push(['adj', k, lv]);
+  }
+  for (const v of App.conj.verbs) drillArgs.push(['conjv', v.w]);
+  for (const t of ['read', 'big', 'listen', 'counter', 'date', 'time', 'price', 'mix']) drillArgs.push(['num', t]);
+  for (const P of JPDATA.particles) drillArgs.push(['ptc', P.p]);
+  for (const T of JPDATA.compare) drillArgs.push(['cmp', T.id]);
+  for (const lv of ['n5', 'n4', 'n3', 'n2']) drillArgs.push(['cmp', 'all', lv]);
+  for (const sit of JPDATA.phrases) drillArgs.push(['phr', sit.id]);
+  drillArgs.push(['phr', 'all']);
+  for (const lv of ['n5', 'n4', 'n3', 'n2', 'n1']) { drillArgs.push(['gq', lv]); for (const t of ['dict', 'mean', 'word', 'mix']) drillArgs.push(['lis', t, lv]); }
+  App._listIds = App.C.levelById.n4._vocab.slice(0, 40).map((v) => v.id);
+  drillArgs.push(['ids']);
+  counts.drills = 0;
+  for (let rep = 0; rep < 6; rep++) for (const [key, ...args] of drillArgs) {
+    const r = App.drills[key](args);
+    const where = `drill ${key}/${args.join('/')}`;
+    if (!r || !r.list) { problems.push(`${where}: no drill`); continue; }
+    counts.drills++;
+    const min = key === 'conjv' ? 6 : key === 'cmp' && args[0] !== 'all' ? 4 : 8;
+    if (r.list.length < min) problems.push(`${where}: only ${r.list.length} exercises`);
+    r.list.forEach((ex, i) => checkEx(`${where}#${i}`, ex));
+  }
   return { problems: [...new Set(problems)], counts };
 });
 
-console.log(`lessons generated: ${report.counts.lessons}, exercises: ${report.counts.exercises}`);
+console.log(`lessons generated: ${report.counts.lessons}, drills: ${report.counts.drills}, exercises: ${report.counts.exercises}`);
 console.log('exercise kinds:', Object.entries(report.counts.kinds).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}=${v}`).join(', '));
 if (report.problems.length) {
   console.log(`\n${report.problems.length} problem(s):`);

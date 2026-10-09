@@ -19,6 +19,45 @@
     return arr[seed % arr.length];
   }
 
+  /* 오늘의 학습 플랜: 복습 → 챌린지 → 코스 → 트레이닝 → 듣기 */
+  const DAY_MOD = [
+    ['lis', '🎧', '청해 트레이닝 1회', 'listen'], ['conj', '🔄', '동사 활용 트레이닝 1회', 'conj'], ['ptc', '🧷', '조사 트레이닝 1회', 'particles'],
+    ['num', '🔢', '숫자·날짜 트레이닝 1회', 'numbers'], ['cmp', '⚖️', '헷갈리는 문법 1세트', 'compare'], ['adj', '🎨', '형용사 활용 트레이닝 1회', 'adj'],
+    ['phr', '🗣️', '상황별 회화 연습 1회', 'phrases'],
+  ];
+  function planTasks() {
+    const st = S();
+    const d = App.game.today();
+    const due = App.srs.dueIds().length;
+    const node = App.path.current();
+    const lastU = App.C.unitById[st.lastUnit] || App.C.levels[0].units[0];
+    const mod = DAY_MOD[new Date().getDay()];
+    return [
+      { icon: '🔁', t: due ? `복습 카드 ${Math.min(due, 10)}장 넘기기` : '복습 카드 — 지금은 복습할 카드 없음', done: (d.reviews || 0) >= Math.min(10, due || 0) && ((d.reviews || 0) > 0 || due === 0), go: 'cards/srs/all' },
+      { icon: '🎮', t: node ? `챌린지 레슨 1개 (${node.label})` : '챌린지 레슨 1개', done: (d.nodes || 0) >= 1, go: node ? 'lesson/node/' + encodeURIComponent(node.id) : 'path' },
+      { icon: '📘', t: `코스 단원 공부 (${lastU.title})`, done: Object.keys(d.cu || {}).length >= 1, go: 'unit/' + lastU.id },
+      { icon: mod[1], t: mod[2], done: (d.drills || 0) >= 1, go: mod[3] },
+      { icon: '👂', t: `일본어 문장 10개 듣기 (${Math.min(10, d.listen || 0)}/10)`, done: (d.listen || 0) >= 10, go: 'listen' },
+    ];
+  }
+  function planCard() {
+    const st = S();
+    const tasks = planTasks();
+    const doneN = tasks.filter((t) => t.done).length;
+    const key = util.dayKey();
+    if (doneN === tasks.length && !st.plan[key]) {
+      st.plan[key] = true;
+      st.gems += 15;
+      App.store.save();
+      setTimeout(() => App.ui.celebrate('📋 오늘의 플랜 완료!', '모든 계획을 해냈어요. 보상으로 💎 15개!'), 300);
+    }
+    return h('div.plan-card',
+      h('div.pc-head', h('b', '📋 오늘의 학습 플랜'), h('span.small', `${doneN} / ${tasks.length}${st.plan[key] ? ' · 💎 받음' : ' · 완료 시 💎15'}`)),
+      App.ui.bar(doneN / tasks.length, 'plan-bar'),
+      h('div.plan-list', tasks.map((t) => h('button.plan-item' + (t.done ? '.done' : ''), { type: 'button', onclick: () => App.go(t.go) },
+        h('span.pi-check', t.done ? '✅' : '⬜'), h('span.pi-i', { lang: 'ja' }, t.icon), h('span.pi-t', t.t), h('span.mi-go', '›')))));
+  }
+
   App.screens.home = function () {
     const st = S();
     const el = h('div.pad.home');
@@ -44,6 +83,9 @@
       const d = App.util.daysBetween(util.dayKey(), st.profile.examDate);
       if (d >= 0) el.appendChild(h('div.dday', h('span', `📅 JLPT ${(st.profile.target || '').toUpperCase()}`), h('b', d === 0 ? 'D-DAY!' : `D-${d}`)));
     }
+
+    // 오늘의 학습 플랜
+    el.appendChild(planCard());
 
     // 두 가지 학습 과정
     const lastU = App.C.unitById[st.lastUnit] || App.C.levels[0].units[0];
@@ -75,6 +117,14 @@
       h('button.mini-card.grow', { type: 'button', onclick: () => App.go('focus') },
         h('div.mc-big', '🧘'), h('div.mc-label', '집중 모드'))));
 
+    // 트레이닝 센터
+    el.appendChild(h('div.section-title.row', h('span.grow', '🏋️ 트레이닝 센터'), h('button.link.small', { type: 'button', onclick: () => App.go('train') }, '전체 보기 ›')));
+    const TR = [['🔄', '동사 활용', 'conj'], ['🧷', '조사', 'particles'], ['⚖️', '비교 문법', 'compare'], ['🔢', '숫자·날짜', 'numbers'], ['🎧', '청해', 'listen'], ['🗣️', '회화 표현', 'phrases']];
+    el.appendChild(h('div.train-mini', TR.map(([i, t, r]) => h('button.tm', { type: 'button', onclick: () => App.go(r) }, h('span.tm-i', { lang: 'ja' }, i), h('span.tm-t', t)))));
+    if (!st.placement && st.counters.lessons < 30) {
+      el.appendChild(h('button.place-banner', { type: 'button', onclick: () => App.go('placement') }, h('span', '🧭'), h('div.grow', h('b', '내 레벨 진단하기'), h('div.small', '5분 테스트로 나에게 맞는 시작 레벨을 찾아요')), h('span', '›')));
+    }
+
     // 오늘의 단어
     const tgt = App.C.levelById[st.profile.target] || App.C.levelById.n5;
     const pool = tgt && tgt._vocab.length ? tgt._vocab : App.C.all.v;
@@ -102,8 +152,9 @@
     // 바로가기
     el.appendChild(h('div.section-title', '학습 도구'));
     const tools = [
-      ['📝', 'JLPT 모의고사', 'exam'], ['🔎', '사전 검색', 'dict'], ['あ', '50음도', 'kana'],
-      ['✍️', '쓰기 연습', 'write/あ'], ['📊', '학습 통계', 'stats'], ['🏆', '업적', 'ach'],
+      ['📝', 'JLPT 모의고사', 'exam'], ['📒', '단어장', 'words'], ['📑', '문법 색인', 'gindex'],
+      ['🔎', '사전 검색', 'dict'], ['あ', '50음도', 'kana'], ['✍️', '쓰기 연습', 'write/あ'],
+      ['🧭', '레벨 진단', 'placement'], ['📊', '학습 통계', 'stats'], ['🏆', '업적', 'ach'],
     ];
     el.appendChild(h('div.tool-grid', tools.map(([i, t, r]) => h('button.tool', { type: 'button', onclick: () => App.go(r) }, h('span.tool-i', { lang: 'ja' }, i), h('span.tool-t', t)))));
     return { el, title: '일본어 마스터', tab: 'home' };

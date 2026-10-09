@@ -123,6 +123,7 @@ App.views = (function () {
         h('div.g-sub', '대표 단어'),
         h('div.k-words', k.words.map((w) => h('div.k-word',
           h('span.kw-jp', { lang: 'ja', html: jp.ruby(w.w) }), h('span.kw-m', w.m || ''), speakBtn(jp.kana(w.w))))),
+        kanjiWords(k),
         h('div.row.gap',
           h('button.btn.ghost.grow', { type: 'button', onclick: () => { App.ui.closeTop(); App.go('write/' + encodeURIComponent(k.c)); } }, '✍️ 쓰기 연습'),
           h('button.btn.primary.grow', { type: 'button', onclick: () => { App.srs.add(k.id); App.ui.toast('복습 카드에 추가했어요'); } }, '🔁 복습 추가'),
@@ -143,6 +144,7 @@ App.views = (function () {
           h('div.item-mean', it.m),
           h('div.row.gap.center-row', speakBtn(it.r, '🔊 듣기', 'wide'), markBtn(it.id)),
           it.ex ? exampleRow(it.ex, it.exKo) : null,
+          relatedBlock(it),
           levelTag(it));
       } else if (it.t === 'g') {
         body.append(grammarCard(it, { compact: true }), levelTag(it));
@@ -154,6 +156,36 @@ App.views = (function () {
             h('button.btn.ghost', { type: 'button', onclick: () => { App.ui.closeTop(); App.go('write/' + encodeURIComponent(it.c)); } }, '✍️ 쓰기')));
       }
     }, { title: { v: '단어', g: '문법', s: '문장', a: '문자' }[it.t] || '' });
+  }
+
+  /* 관련 예문 자동 검색 (전체 예문·회화에서) */
+  let plainCache = null;
+  function relatedSents(v, max = 4) {
+    if (!plainCache) plainCache = App.C.all.s.map((s) => [jp.plain(s.jp), s]);
+    const w = v.w;
+    const own = v.ex ? jp.plain(v.ex) : '';
+    let re = null;
+    if (jp.hasKanji(w) && /[うくぐすつぬぶむるい]$/.test(w) && w.length >= 2) {
+      const stem = w.slice(0, -1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      re = new RegExp(stem + '[ぁ-ん]');
+    } else if (!jp.hasKanji(w) && [...w].length < 3) return [];
+    const out = [];
+    for (const [p, s] of plainCache) {
+      if (p === own) continue;
+      if (re ? re.test(p) : p.includes(w)) { out.push(s); if (out.length >= max) break; }
+    }
+    return out;
+  }
+  function relatedBlock(v) {
+    const list = relatedSents(v);
+    if (!list.length) return null;
+    return h('div.related', h('div.g-sub', `🔗 이 단어가 쓰인 다른 예문 (${list.length})`), list.map((s) => exampleRow(s.jp, s.ko)));
+  }
+  function kanjiWords(k) {
+    const vs = App.C.all.v.filter((v) => v.w.includes(k.c)).slice(0, 16);
+    if (!vs.length) return null;
+    return h('div.related', h('div.g-sub', `🔗 이 한자가 들어간 단어 (${vs.length}${vs.length >= 16 ? '+' : ''})`),
+      h('div.ex-chips', vs.map((v) => h('button.ex-chip', { type: 'button', onclick: () => App.tts.speak(v.r) }, h('b', { lang: 'ja' }, v.w), h('small', `${v.r !== v.w ? v.r + ' · ' : ''}${v.m}`)))));
   }
 
   function levelTag(it) {
