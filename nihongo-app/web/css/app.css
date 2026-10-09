@@ -681,8 +681,8 @@ body.full #focus-pill { bottom: 96px; }
 .league-hero { text-align: center; background: var(--surface); border-radius: 20px; padding: 18px; box-shadow: var(--shadow); border-top: 6px solid var(--tier); }
 .lh-icon { font-size: 50px; }
 .lh-tier { font-size: 22px; font-weight: 900; color: var(--tier); }
-.tier-row { display: flex; justify-content: center; gap: 4px; margin: 12px 0; flex-wrap: wrap; }
-.tier { font-size: 20px; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
+.tier-row { display: flex; justify-content: center; gap: 3px; margin: 12px 0; flex-wrap: nowrap; }
+.tier { font-size: 17px; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
 .tier.on { outline: 3px solid var(--tier); transform: scale(1.15); }
 .tier.lock { filter: grayscale(1); opacity: .4; }
 .league-list { background: var(--surface); border-radius: 18px; box-shadow: var(--shadow); overflow: hidden; }

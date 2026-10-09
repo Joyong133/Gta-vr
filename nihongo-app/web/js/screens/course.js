@@ -170,8 +170,8 @@
     },
     vocab(u, body) {
       body.appendChild(h('div.row.gap.wrap',
-        h('button.btn.primary.grow', { type: 'button', onclick: () => App.go('cards/unit/' + u.id) }, '🃏 카드로 외우기'),
-        h('button.btn.ghost.grow', { type: 'button', onclick: () => autoPlay(u._vocab) }, '🎧 연속 듣기'),
+        h('button.btn.primary.grow', { type: 'button', onclick: () => App.go('cards/unit/' + u.id) }, '🃏 카드 학습'),
+        h('button.btn.ghost.grow', { type: 'button', onclick: () => autoPlay(u._vocab) }, '🎧 듣기'),
         h('button.btn.ghost.grow', { type: 'button', onclick: () => App.go('lesson/practice/' + u.id) }, '✍️ 연습')));
       const hide = h('div.row.gap.toggles',
         h('label.toggle', h('input', { type: 'checkbox', onchange: (e) => body.classList.toggle('hide-mean', e.target.checked) }), '뜻 가리기'),

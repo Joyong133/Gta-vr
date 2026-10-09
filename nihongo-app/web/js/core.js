@@ -48,6 +48,14 @@ App.h = function h(spec, attrs, ...children) {
   return el;
 };
 
+// 화면 코드에서 조건부 자식(null/false)을 넘겨도 안전하도록 append를 보강
+(function () {
+  const native = Element.prototype.append;
+  Element.prototype.append = function (...nodes) {
+    return native.apply(this, nodes.flat(Infinity).filter((n) => n != null && n !== false));
+  };
+})();
+
 /* ───────── 일반 유틸 ───────── */
 App.util = {
   shuffle(arr) {
@@ -298,7 +306,10 @@ App.speech = {
   _pending: {},
   _seq: 0,
   get supported() {
-    if (App.native.available) return !!App.native.call('speechAvailable');
+    if (App.native.available) {
+      if (App.speech._nat == null) App.speech._nat = !!App.native.call('speechAvailable');
+      return App.speech._nat;
+    }
     return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
   },
   listen(lang = 'ja-JP') {

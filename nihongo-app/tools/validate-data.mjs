@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.join(here, '..', 'web', 'data');
-const order = ['kana.js', 'n5.js', 'n4.js', 'n3.js', 'n2.js', 'n1.js', 'extra.js'];
+const order = ['kana.js', 'n5.js', 'n4.js', 'n3.js', 'n2.js', 'n1.js', 'vocab-plus.js', 'extra.js'];
 
 const ctx = { window: {} };
 vm.createContext(ctx);
