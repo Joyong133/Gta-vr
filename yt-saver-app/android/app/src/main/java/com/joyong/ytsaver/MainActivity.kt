@@ -62,6 +62,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val login = registerForActivityResult(LoginActivity.Contract()) { ok ->
+        updateAccountUi()
+        if (ok && !DownloadService.retryLast(this)) toast("로그인했어요. 다시 저장해 보세요")
+    }
+
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
@@ -87,7 +92,22 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
-        b.toolbar.subtitle = "v${App.versionName}"
+        updateAccountUi()
+        b.toolbar.setOnMenuItemClickListener {
+            if (YouTubeAccount.isLoggedIn(this)) {
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("유튜브 로그아웃할까요?")
+                    .setNegativeButton("취소", null)
+                    .setPositiveButton("로그아웃") { _, _ ->
+                        YouTubeAccount.logout(this)
+                        updateAccountUi()
+                    }
+                    .show()
+            } else {
+                askLogin()
+            }
+            true
+        }
 
         adapter = VideoAdapter(
             onClick = ::play,
@@ -433,10 +453,35 @@ class MainActivity : AppCompatActivity() {
             }
         if (f.captchaUrl != null) {
             dialog.setPositiveButton("로봇 확인하기") { _, _ -> captcha.launch(f.captchaUrl) }
+        } else if (f.needsLogin) {
+            dialog.setPositiveButton("유튜브 로그인") { _, _ -> askLogin() }
         } else {
             dialog.setPositiveButton("다시 시도") { _, _ -> DownloadService.retryLast(this) }
         }
         dialog.show()
+    }
+
+    private fun askLogin() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("유튜브 로그인")
+            .setMessage(
+                "유튜브가 지금 인터넷(IP)에서 로그인 없는 요청을 막고 있어요. " +
+                    "로그인한 계정으로 요청하면 통과되는 경우가 많아요.\n\n" +
+                    "• 다운로드에 쓰는 계정은 구글이 제한할 수 있어서 부계정을 권장해요\n" +
+                    "• 비밀번호는 앱이 저장하지 않고, 로그인 후 유튜브 쿠키만 이 폰에 저장해요\n" +
+                    "• 구글이 \"안전하지 않은 브라우저\"라며 막으면 이 방법은 쓸 수 없어요"
+            )
+            .setNegativeButton("취소", null)
+            .setPositiveButton("로그인하기") { _, _ -> login.launch(Unit) }
+            .show()
+    }
+
+    private fun updateAccountUi() {
+        val loggedIn = YouTubeAccount.isLoggedIn(this)
+        b.toolbar.subtitle = "v${App.versionName}" + if (loggedIn) " · 유튜브 로그인됨" else ""
+        b.toolbar.menu.clear()
+        b.toolbar.menu.add(if (loggedIn) "로그아웃" else "유튜브 로그인")
+            .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()

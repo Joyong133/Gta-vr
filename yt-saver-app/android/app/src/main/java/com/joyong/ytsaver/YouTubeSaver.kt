@@ -249,6 +249,10 @@ object YouTubeSaver {
         return null
     }
 
+    /** 유튜브가 IP를 막고 로그인을 요구한 경우 */
+    fun isBotBlock(e: Throwable): Boolean =
+        generateSequence(e) { it.cause }.any { it is SignInConfirmNotBotException }
+
     /** 원인 추적용 자세한 오류 (예외 종류와 유튜브가 준 사유) */
     fun detail(e: Throwable): String {
         val chain = generateSequence(e) { it.cause }.take(5).toList()
@@ -258,7 +262,8 @@ object YouTubeSaver {
         val attempts = chain.filterIsInstance<AllClientsFailedException>()
             .flatMap { it.attempts }
             .joinToString("") { "\n+ $it" }
-        return "앱 버전 ${App.versionName}\n$main$attempts"
+        val login = if (YouTubeAccount.isLoggedIn(App.instance)) "로그인됨" else "로그인 안 함"
+        return "앱 버전 ${App.versionName} · $login\n$main$attempts"
     }
 
     fun describe(e: Throwable): String = when (e) {

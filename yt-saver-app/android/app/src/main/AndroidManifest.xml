@@ -40,6 +40,10 @@
             android:name=".CaptchaActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".LoginActivity"
+            android:exported="false" />
+
         <service
             android:name=".PlaybackService"
             android:exported="true"

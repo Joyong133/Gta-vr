@@ -82,7 +82,7 @@ object VideoSource {
             try {
                 return Innertube.player(id, client)
             } catch (e: Exception) {
-                attempts += "${client.label} → ${e.javaClass.simpleName}: ${e.message}"
+                attempts += "${e.javaClass.simpleName}: ${e.message}"
             }
         }
         throw AllClientsFailedException(first, attempts)
@@ -144,6 +144,8 @@ object VideoSource {
         val extra: Map<String, Any>,
         /** 다른 사이트에 퍼가기(embed)된 플레이어인 척할 때의 페이지 주소 */
         val embedUrl: String? = null,
+        /** 로그인 쿠키를 받아 주는 클라이언트 (안드로이드 계열은 안 받음) */
+        val supportsCookies: Boolean = false,
     )
 
     private val FALLBACK_CLIENTS = listOf(
@@ -159,6 +161,7 @@ object VideoSource {
                 "deviceMake" to "Samsung", "deviceModel" to "UKS9800",
                 "osName" to "Tizen", "osVersion" to "2.4.0",
             ),
+            supportsCookies = true,
         ),
         Client(
             label = "퍼가기 플레이어",
@@ -170,6 +173,7 @@ object VideoSource {
             needsJsPlayer = true,
             extra = emptyMap(),
             embedUrl = "https://www.reddit.com/",
+            supportsCookies = true,
         ),
         Client(
             label = "Oculus VR",
@@ -204,6 +208,8 @@ object VideoSource {
         }.getOrNull()?.also { visitorData = it }
 
         fun player(id: String, client: Client): VideoInfo {
+            val auth = if (client.supportsCookies) YouTubeAccount.authHeaders(App.instance) else emptyMap()
+            val label = if (auth.isNotEmpty()) "${client.label}+로그인" else client.label
             val visitor = visitorData()
             val clientJson = JSONObject()
                 .put("clientName", client.name)
@@ -238,9 +244,10 @@ object VideoSource {
                 .header("Origin", "https://www.youtube.com")
                 .apply { visitor?.let { header("X-Goog-Visitor-Id", it) } }
                 .apply { client.embedUrl?.let { header("Referer", it) } }
+                .apply { auth.forEach { (k, v) -> header(k, v) } }
                 .build()
             val json = App.http.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) throw IOException("${client.label}: HTTP ${resp.code}")
+                if (!resp.isSuccessful) throw IOException("$label: HTTP ${resp.code}")
                 JSONObject(resp.body?.string().orEmpty())
             }
 
@@ -248,16 +255,16 @@ object VideoSource {
             val status = playability?.optString("status").orEmpty()
             if (!status.equals("OK", ignoreCase = true)) {
                 val reason = playability?.optString("reason").orEmpty()
-                throw IOException("${client.label}: $status \"$reason\"")
+                throw IOException("$label: $status \"$reason\"")
             }
 
             val streaming = json.optJSONObject("streamingData")
-                ?: throw IOException("${client.label}: 스트림 정보 없음")
+                ?: throw IOException("$label: 스트림 정보 없음")
             val streams = buildList {
                 parseFormats(id, client, streaming.optJSONArray("formats"), muxed = true, into = this)
                 parseFormats(id, client, streaming.optJSONArray("adaptiveFormats"), muxed = false, into = this)
             }
-            if (streams.isEmpty()) throw IOException("${client.label}: 받을 수 있는 스트림 없음")
+            if (streams.isEmpty()) throw IOException("$label: 받을 수 있는 스트림 없음")
 
             val details = json.optJSONObject("videoDetails") ?: JSONObject()
             val thumbs = details.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
@@ -289,7 +296,7 @@ object VideoSource {
                 streams = streams,
                 captions = captions,
                 userAgent = client.userAgent,
-                via = client.label,
+                via = label,
             )
         }
 

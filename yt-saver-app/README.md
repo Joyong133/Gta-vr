@@ -48,6 +48,10 @@
   참고해 **TV(삼성 TVHTML5)** → **퍼가기 플레이어(WEB_EMBEDDED_PLAYER)** → **Oculus VR(ANDROID_VR)** 순서로 `/youtubei/v1/player`에 직접 요청한다.
   TV 클라이언트의 서명/n 파라미터는 NewPipeExtractor의 `YoutubeJavaScriptPlayerManager`로 푼다.
   모두 막히면 와이파이↔데이터 전환, VPN 끄기, 시간 두고 재시도. 자세한 오류에 각 클라이언트 결과(`+ ...`)가 나온다.
+- **유튜브 로그인**: 위 방식이 모두 `LOGIN_REQUIRED`로 막히면(IP 차단) 오른쪽 위 **유튜브 로그인**으로
+  구글 계정에 로그인. 비밀번호는 저장하지 않고 로그인 후 youtube.com 쿠키만 앱 저장소에 보관하고,
+  TV·퍼가기 클라이언트 요청에 쿠키와 `SAPISIDHASH` 인증 헤더(yt-dlp와 같은 방식)를 붙인다.
+  다운로드용 계정은 구글이 제한할 수 있어 부계정 권장. 구글이 웹뷰 로그인을 막으면 사용할 수 없음.
 - 오류 창의 "자세한 오류"에 예외 종류와 유튜브가 준 사유가 나오고 **오류 복사**로 복사 가능.
 
 ## 주의

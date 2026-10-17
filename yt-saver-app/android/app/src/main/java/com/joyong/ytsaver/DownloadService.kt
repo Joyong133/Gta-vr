@@ -130,6 +130,7 @@ class DownloadService : Service() {
                 message = msg,
                 detail = YouTubeSaver.detail(e),
                 captchaUrl = YouTubeSaver.captchaUrl(e),
+                needsLogin = YouTubeSaver.isBotBlock(e) && !YouTubeAccount.isLoggedIn(this),
             )
             notifyDone("저장 실패", msg)
         } finally {
@@ -212,6 +213,8 @@ class DownloadService : Service() {
         val detail: String,
         /** 유튜브가 reCAPTCHA를 요구한 경우 확인 페이지 주소 */
         val captchaUrl: String?,
+        /** IP가 막혀 로그인이 필요한 경우 (아직 로그인 안 함) */
+        val needsLogin: Boolean = false,
     )
 
     companion object {
