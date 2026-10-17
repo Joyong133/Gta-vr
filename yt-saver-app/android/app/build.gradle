@@ -39,11 +39,7 @@ android {
     }
 
     compileOptions {
-        // 유튜브 자동 번역이 막혔을 때 기기 안에서 한국어로 번역
-    implementation 'com.google.mlkit:translate:17.0.3'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0'
-
-    coreLibraryDesugaringEnabled true
+        coreLibraryDesugaringEnabled true
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
