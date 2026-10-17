@@ -12,6 +12,13 @@
 - 또는 앱에서 링크를 붙여넣고 화질을 고른 뒤 **저장하기**.
 - 목록에서 영상을 누르면 재생, 길게 누르면 삭제.
 - 재생 중 홈 버튼/뒤로가기/화면 끄기 → 소리는 계속, 알림창에서 일시정지·다음 곡 조작.
+- **시청 기록**: 영상마다 본 위치를 기억해 다시 누르면 이어서 재생. 목록에 진행 막대와
+  "이어보기 / 다 봄"을 표시하고, "최근 본" 정렬을 지원. 앱이 완전히 꺼져도 다시 열면
+  마지막으로 보던 영상이 그 위치에 일시정지 상태로 준비됨.
+- **한국어 자막**: 저장할 때 "한국어 자막 같이 저장"을 켜 두면 한국어 자막이 있으면 그대로,
+  없으면 유튜브 자동 번역(tlang=ko)으로, 그것도 막히면 ML Kit으로 기기 안에서 번역해
+  `sub_ko.vtt`로 저장. 원어 자막은 `sub_orig.vtt`. 플레이어의 CC 버튼으로 켜고 끔.
+  이미 저장한 영상은 길게 눌러 "한국어 자막 받기".
 
 ## 구조
 | 파일 | 역할 |
@@ -19,7 +26,9 @@
 | `YouTubeSaver.kt` | NewPipeExtractor로 스트림을 찾고 화질에 맞는 영상·소리 파일을 구간 단위로 내려받음 |
 | `DownloadService.kt` | 앱을 내려도 저장이 계속되도록 포그라운드 서비스에서 대기열 처리 |
 | `Library.kt` | `Android/data/com.joyong.ytsaver/files/videos/<영상ID>/` 에 파일과 `meta.json` 보관 |
-| `PlaybackService.kt` | Media3 `MediaSessionService` + ExoPlayer. 영상/소리 파일을 합쳐 재생, 백그라운드 재생 |
+| `SubtitleSaver.kt` | 유튜브 자막(json3)을 받아 한국어로 번역해 WebVTT로 저장 |
+| `WatchHistory.kt` | 영상별 시청 위치와 마지막 재생목록 저장 |
+| `PlaybackService.kt` | Media3 `MediaSessionService` + ExoPlayer. 영상/소리/자막 파일을 합쳐 재생, 백그라운드 재생, 시청 위치 저장 |
 | `MainActivity.kt` | 입력·진행률·보관함 목록·플레이어 화면 |
 
 화면이 꺼지면 영상 트랙 디코딩을 끄고 소리만 재생해서 배터리를 아낍니다.

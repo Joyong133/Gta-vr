@@ -18,6 +18,11 @@ data class SavedVideo(
     val videoFile: File?,
     val audioFile: File?,
     val thumbFile: File?,
+    /** 한국어 자막(원래 한국어이거나 번역한 것) */
+    val subKo: File? = null,
+    /** 번역 전 원어 자막 */
+    val subOrig: File? = null,
+    val subOrigLang: String = "",
 ) {
     val audioOnly get() = videoFile == null
     val sizeBytes get() = (videoFile?.length() ?: 0L) + (audioFile?.length() ?: 0L)
@@ -63,23 +68,23 @@ object Library {
         video.dir.deleteRecursively()
     }
 
-    fun writeMeta(
-        dir: File, id: String, title: String, uploader: String, durationSec: Long,
-        quality: String, videoFile: File?, audioFile: File?, thumbFile: File?,
-    ) {
+    fun writeMeta(video: SavedVideo) {
         val json = JSONObject()
-            .put("id", id)
-            .put("title", title)
-            .put("uploader", uploader)
-            .put("durationSec", durationSec)
-            .put("quality", quality)
-            .put("savedAt", System.currentTimeMillis())
-            .put("video", videoFile?.name ?: "")
-            .put("audio", audioFile?.name ?: "")
-            .put("thumb", thumbFile?.name ?: "")
-        val tmp = File(dir, "$META.tmp")
+            .put("id", video.id)
+            .put("title", video.title)
+            .put("uploader", video.uploader)
+            .put("durationSec", video.durationSec)
+            .put("quality", video.quality)
+            .put("savedAt", video.savedAt)
+            .put("video", video.videoFile?.name ?: "")
+            .put("audio", video.audioFile?.name ?: "")
+            .put("thumb", video.thumbFile?.name ?: "")
+            .put("subKo", video.subKo?.name ?: "")
+            .put("subOrig", video.subOrig?.name ?: "")
+            .put("subOrigLang", video.subOrigLang)
+        val tmp = File(video.dir, "$META.tmp")
         tmp.writeText(json.toString())
-        tmp.renameTo(File(dir, META))
+        tmp.renameTo(File(video.dir, META))
     }
 
     private fun load(dir: File): SavedVideo? {
@@ -103,6 +108,9 @@ object Library {
                 videoFile = video,
                 audioFile = audio,
                 thumbFile = file("thumb"),
+                subKo = file("subKo"),
+                subOrig = file("subOrig"),
+                subOrigLang = json.optString("subOrigLang"),
             )
         } catch (e: Exception) {
             null

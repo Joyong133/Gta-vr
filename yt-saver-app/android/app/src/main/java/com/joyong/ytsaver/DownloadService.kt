@@ -26,19 +26,33 @@ import kotlinx.coroutines.launch
 
 sealed interface DownloadState {
     data object Idle : DownloadState
-    data class Running(val title: String, val done: Long, val total: Long, val queued: Int) :
-        DownloadState
+    data class Running(
+        val title: String,
+        val done: Long,
+        val total: Long,
+        val queued: Int,
+        val status: String? = null,
+    ) : DownloadState
 }
 
 /** 앱을 내려도 저장이 끊기지 않도록 포그라운드 서비스에서 순서대로 받는다. */
 class DownloadService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val queue = Channel<Pair<String, Quality>>(Channel.UNLIMITED)
+    /** 새 영상 저장(url) 또는 이미 저장한 영상에 자막 추가(subtitleFor) */
+    private data class Task(
+        val url: String? = null,
+        val quality: Quality = Quality.P720,
+        val withSubtitles: Boolean = true,
+        val subtitleFor: String? = null,
+    )
+
+    private val queue = Channel<Task>(Channel.UNLIMITED)
     private var worker: Job? = null
     private var current: Job? = null
     private var pending = 0
     private var lastNotifiedPercent = -2
+    private var lastStatus: String? = null
     private var doneNotificationId = 100
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -53,11 +67,13 @@ class DownloadService : Service() {
             current?.cancel()
         } else {
             val url = intent?.getStringExtra(EXTRA_URL)
+            val subtitleFor = intent?.getStringExtra(EXTRA_SUBTITLE_FOR)
             val quality = intent?.getStringExtra(EXTRA_QUALITY)
                 ?.let { runCatching { Quality.valueOf(it) }.getOrNull() } ?: Quality.P720
-            if (url != null) {
+            val withSubtitles = intent?.getBooleanExtra(EXTRA_SUBTITLES, true) ?: true
+            if (url != null || subtitleFor != null) {
                 pending++
-                queue.trySend(url to quality)
+                queue.trySend(Task(url, quality, withSubtitles, subtitleFor))
             }
         }
 
@@ -65,8 +81,8 @@ class DownloadService : Service() {
             stopSelfSafely()
         } else if (worker == null) {
             worker = scope.launch {
-                for ((url, quality) in queue) {
-                    val job = launch { process(url, quality) }
+                for (task in queue) {
+                    val job = launch { process(task) }
                     current = job
                     job.join()
                     current = null
@@ -78,16 +94,31 @@ class DownloadService : Service() {
         return START_NOT_STICKY
     }
 
-    private suspend fun process(url: String, quality: Quality) {
+    private suspend fun process(task: Task) {
         _state.value = DownloadState.Running("영상 정보 가져오는 중…", 0, 0, pending - 1)
         lastNotifiedPercent = -2
+        lastStatus = null
+        val onProgress = { p: YouTubeSaver.Progress ->
+            _state.value = DownloadState.Running(p.title, p.done, p.total, pending - 1, p.status)
+            updateProgressNotification(p)
+        }
         try {
-            val saved = YouTubeSaver.save(this, url, quality) { p ->
-                _state.value = DownloadState.Running(p.title, p.done, p.total, pending - 1)
-                updateProgressNotification(p)
+            if (task.subtitleFor != null) {
+                val video = Library.find(this, task.subtitleFor)
+                    ?: throw SaveException("영상을 찾을 수 없어요")
+                val updated = YouTubeSaver.addSubtitles(this, video, onProgress)
+                _events.tryEmit(Event.Saved(updated.title, "한국어 자막 저장 완료"))
+                notifyDone("자막 저장 완료", updated.title)
+            } else {
+                val saved = YouTubeSaver.save(this, task.url!!, task.quality, task.withSubtitles, onProgress)
+                val note = when {
+                    !task.withSubtitles -> "저장 완료"
+                    saved.subKo != null -> "저장 완료 (한국어 자막 포함)"
+                    else -> "저장 완료 (자막 없음)"
+                }
+                _events.tryEmit(Event.Saved(saved.title, note))
+                notifyDone(note, saved.title)
             }
-            _events.tryEmit(Event.Saved(saved.title))
-            notifyDone("저장 완료", saved.title)
         } catch (e: CancellationException) {
             _events.tryEmit(Event.Failed("저장을 취소했어요"))
         } catch (e: Exception) {
@@ -101,13 +132,19 @@ class DownloadService : Service() {
 
     private fun updateProgressNotification(p: YouTubeSaver.Progress) {
         val percent = if (p.total > 0) (p.done * 100 / p.total).toInt() else -1
-        if (percent == lastNotifiedPercent) return
+        if (percent == lastNotifiedPercent && p.status == lastStatus) return
         lastNotifiedPercent = percent
+        lastStatus = p.status
         val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIFICATION_ID, progressNotification(p.title, p.done, p.total))
+        nm.notify(NOTIFICATION_ID, progressNotification(p.title, p.done, p.total, p.status))
     }
 
-    private fun progressNotification(title: String, done: Long, total: Long): Notification {
+    private fun progressNotification(
+        title: String,
+        done: Long,
+        total: Long,
+        status: String? = null,
+    ): Notification {
         val cancel = PendingIntent.getService(
             this, 1, Intent(this, DownloadService::class.java).setAction(ACTION_CANCEL),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -116,7 +153,9 @@ class DownloadService : Service() {
         return NotificationCompat.Builder(this, App.CHANNEL_DOWNLOAD)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(title)
-            .setContentText(if (total > 0) "$percent% · ${formatSize(done)} / ${formatSize(total)}" else "저장 중…")
+            .setContentText(
+                status ?: if (total > 0) "$percent% · ${formatSize(done)} / ${formatSize(total)}" else "저장 중…"
+            )
             .setProgress(100, percent, total <= 0)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -156,7 +195,7 @@ class DownloadService : Service() {
     }
 
     sealed interface Event {
-        data class Saved(val title: String) : Event
+        data class Saved(val title: String, val note: String) : Event
         data class Failed(val message: String) : Event
     }
 
@@ -165,6 +204,8 @@ class DownloadService : Service() {
         private const val ACTION_CANCEL = "com.joyong.ytsaver.CANCEL"
         private const val EXTRA_URL = "url"
         private const val EXTRA_QUALITY = "quality"
+        private const val EXTRA_SUBTITLES = "subtitles"
+        private const val EXTRA_SUBTITLE_FOR = "subtitle_for"
 
         private val _state = MutableStateFlow<DownloadState>(DownloadState.Idle)
         val state: StateFlow<DownloadState> = _state
@@ -172,10 +213,17 @@ class DownloadService : Service() {
         private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 16)
         val events: SharedFlow<Event> = _events
 
-        fun start(context: Context, url: String, quality: Quality) {
+        fun start(context: Context, url: String, quality: Quality, withSubtitles: Boolean) {
             val intent = Intent(context, DownloadService::class.java)
                 .putExtra(EXTRA_URL, url)
                 .putExtra(EXTRA_QUALITY, quality.name)
+                .putExtra(EXTRA_SUBTITLES, withSubtitles)
+            ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun addSubtitles(context: Context, videoId: String) {
+            val intent = Intent(context, DownloadService::class.java)
+                .putExtra(EXTRA_SUBTITLE_FOR, videoId)
             ContextCompat.startForegroundService(context, intent)
         }
 

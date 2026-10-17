@@ -32,6 +32,29 @@
             android:textColor="#FFFFFF"
             android:textSize="11sp"
             android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/subBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|end"
+            android:layout_margin="4dp"
+            android:background="#CC000000"
+            android:paddingHorizontal="4dp"
+            android:text="한글자막"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:visibility="gone" />
+
+        <ProgressBar
+            android:id="@+id/watchProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="3dp"
+            android:layout_gravity="bottom"
+            android:max="100"
+            android:progressDrawable="@drawable/watch_progress"
+            android:visibility="gone" />
     </FrameLayout>
 
     <LinearLayout
@@ -57,6 +80,15 @@
             android:ellipsize="end"
             android:maxLines="1"
             android:textAppearance="?attr/textAppearanceBodySmall" />
+
+        <TextView
+            android:id="@+id/watchInfo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?attr/colorPrimary"
+            android:visibility="gone" />
     </LinearLayout>
 
     <ImageView

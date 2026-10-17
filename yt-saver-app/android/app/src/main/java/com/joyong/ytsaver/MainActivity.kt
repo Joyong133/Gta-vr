@@ -35,6 +35,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.snackbar.Snackbar
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.joyong.ytsaver.databinding.ActivityMainBinding
@@ -56,7 +57,11 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     private val playerListener = object : Player.Listener {
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = syncPlayerUi()
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            syncPlayerUi()
+            refreshList()
+        }
+
         override fun onPlaybackStateChanged(playbackState: Int) = syncPlayerUi()
     }
 
@@ -73,13 +78,29 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
-        adapter = VideoAdapter(onClick = ::play, onLongClick = ::confirmDelete)
+        adapter = VideoAdapter(
+            onClick = ::play,
+            onLongClick = ::showItemMenu,
+            historyOf = { WatchHistory.get(this, it) },
+        )
         b.list.layoutManager = LinearLayoutManager(this)
         b.list.adapter = adapter
 
         val savedQuality = prefs.getString("quality", Quality.P720.name)
         Quality.entries.forEach { q ->
             chipFor(q).isChecked = q.name == savedQuality
+        }
+
+        b.subtitleSwitch.isChecked = prefs.getBoolean("subtitles", true)
+        b.subtitleSwitch.setOnCheckedChangeListener { _, checked ->
+            prefs.edit().putBoolean("subtitles", checked).apply()
+        }
+
+        b.sortGroup.check(if (prefs.getBoolean("sort_recent", false)) R.id.sortRecent else R.id.sortSaved)
+        b.sortGroup.addOnButtonCheckedListener { _, id, checked ->
+            if (!checked) return@addOnButtonCheckedListener
+            prefs.edit().putBoolean("sort_recent", id == R.id.sortRecent).apply()
+            refreshList()
         }
 
         b.saveButton.setOnClickListener { startSave(b.urlInput.text?.toString().orEmpty()) }
@@ -92,6 +113,7 @@ class MainActivity : AppCompatActivity() {
         b.cancelButton.setOnClickListener { DownloadService.cancel(this) }
         b.closePlayer.setOnClickListener {
             controller?.run { stop(); clearMediaItems() }
+            WatchHistory.clearSession(this)
             syncPlayerUi()
         }
 
@@ -119,7 +141,7 @@ class MainActivity : AppCompatActivity() {
                     DownloadService.events.collect { e ->
                         when (e) {
                             is DownloadService.Event.Saved -> {
-                                toast("저장 완료: ${e.title}")
+                                toast("${e.note}: ${e.title}")
                                 refreshList()
                             }
                             is DownloadService.Event.Failed -> toast(e.message)
@@ -156,6 +178,7 @@ class MainActivity : AppCompatActivity() {
             c.addListener(playerListener)
             setVideoTrackEnabled(c, true)
             b.playerView.player = c
+            restoreLastSession(c)
             syncPlayerUi()
         }, MoreExecutors.directExecutor())
     }
@@ -214,7 +237,7 @@ class MainActivity : AppCompatActivity() {
         }
         val quality = selectedQuality()
         prefs.edit().putString("quality", quality.name).apply()
-        DownloadService.start(this, url, quality)
+        DownloadService.start(this, url, quality, b.subtitleSwitch.isChecked)
         b.urlInput.setText("")
         getSystemService(InputMethodManager::class.java)
             .hideSoftInputFromWindow(b.urlInput.windowToken, 0)
@@ -228,7 +251,10 @@ class MainActivity : AppCompatActivity() {
                 b.progressCard.isVisible = true
                 b.progressTitle.text = state.title
                 val queued = if (state.queued > 0) " · 대기 ${state.queued}개" else ""
-                if (state.total > 0) {
+                if (state.status != null) {
+                    b.progressBar.isIndeterminate = true
+                    b.progressText.text = state.status + queued
+                } else if (state.total > 0) {
                     val percent = (state.done * 100 / state.total).toInt()
                     b.progressBar.isIndeterminate = false
                     b.progressBar.setProgressCompat(percent, true)
@@ -244,7 +270,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshList() {
-        videos = Library.list(this)
+        val all = Library.list(this)
+        videos = if (b.sortGroup.checkedButtonId == R.id.sortRecent) {
+            // 본 적 있는 영상을 최근 본 순서로, 안 본 영상은 그 뒤에 저장순으로
+            val watchedAt = all.associate { it.id to (WatchHistory.get(this, it.id)?.watchedAt ?: 0L) }
+            all.sortedWith(compareByDescending<SavedVideo> { watchedAt[it.id] }.thenByDescending { it.savedAt })
+        } else {
+            all
+        }
         adapter.submit(videos)
         b.emptyText.isVisible = videos.isEmpty()
         val total = videos.sumOf { it.sizeBytes }
@@ -252,14 +285,58 @@ class MainActivity : AppCompatActivity() {
             if (videos.isEmpty()) "저장된 영상" else "저장된 영상 ${videos.size}개 · ${formatSize(total)}"
     }
 
-    /** 누른 영상부터 보관함 전체를 재생목록으로 재생 */
+    /** 누른 영상부터 보관함 전체를 재생목록으로 재생. 보던 영상이면 이어서 */
     private fun play(video: SavedVideo) {
         val c = controller ?: return toast("플레이어 준비 중이에요. 잠시 후 다시 눌러 주세요")
+        if (c.currentMediaItem?.mediaId == video.id && c.playbackState != Player.STATE_ENDED) {
+            if (c.playbackState == Player.STATE_IDLE) c.prepare()
+            c.play()
+            return
+        }
         val start = videos.indexOfFirst { it.id == video.id }.coerceAtLeast(0)
-        c.setMediaItems(videos.map { it.toMediaItem() }, start, 0L)
+        val resume = WatchHistory.resumePosition(this, video.id)
+        c.setMediaItems(videos.map { it.toMediaItem() }, start, resume)
         c.prepare()
         c.play()
         syncPlayerUi()
+        if (resume > 0) {
+            Snackbar.make(b.root, "${formatDuration(resume / 1000)}부터 이어서 재생해요", Snackbar.LENGTH_LONG)
+                .setAction("처음부터") { controller?.seekTo(0) }
+                .show()
+        }
+    }
+
+    /** 앱이 완전히 종료됐다가 다시 켜졌을 때 마지막으로 보던 영상을 그 위치에 (일시정지 상태로) */
+    private fun restoreLastSession(c: MediaController) {
+        if (c.mediaItemCount > 0) return
+        val (list, index, position) = WatchHistory.restore(this) ?: return
+        c.setMediaItems(list.map { it.toMediaItem() }, index, position)
+        c.prepare()
+    }
+
+    private fun showItemMenu(video: SavedVideo) {
+        val hasSubs = video.subKo != null
+        val options = arrayOf(
+            if (hasSubs) "한국어 자막 다시 받기" else "한국어 자막 받기 (자동 번역)",
+            "시청 기록 지우기",
+            "삭제",
+        )
+        MaterialAlertDialogBuilder(this)
+            .setTitle(video.title)
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        DownloadService.addSubtitles(this, video.id)
+                        toast("자막을 받는 중이에요 (인터넷 필요)")
+                    }
+                    1 -> {
+                        WatchHistory.remove(this, video.id)
+                        refreshList()
+                    }
+                    2 -> confirmDelete(video)
+                }
+            }
+            .show()
     }
 
     private fun confirmDelete(video: SavedVideo) {
@@ -274,6 +351,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 Library.delete(video)
+                WatchHistory.remove(this, video.id)
                 refreshList()
                 syncPlayerUi()
             }

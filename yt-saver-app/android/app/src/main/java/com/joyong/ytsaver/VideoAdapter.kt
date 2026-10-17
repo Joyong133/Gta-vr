@@ -13,6 +13,7 @@ import java.io.File
 class VideoAdapter(
     private val onClick: (SavedVideo) -> Unit,
     private val onLongClick: (SavedVideo) -> Unit,
+    private val historyOf: (String) -> WatchHistory.Entry?,
 ) : RecyclerView.Adapter<VideoAdapter.Holder>() {
 
     private var items: List<SavedVideo> = emptyList()
@@ -43,6 +44,17 @@ class VideoAdapter(
                 v.quality,
                 formatSize(v.sizeBytes),
             ).filterNotNull().joinToString(" · ")
+
+            val history = historyOf(v.id)
+            watchInfo.text = when {
+                history == null -> ""
+                history.finished -> "다 봄 · ${timeAgo(history.watchedAt)}"
+                else -> "이어보기 ${formatDuration(history.positionMs / 1000) ?: "0:00"} · ${timeAgo(history.watchedAt)}"
+            }
+            watchInfo.visibility = if (history == null) View.GONE else View.VISIBLE
+            watchProgress.visibility = if (history != null && history.fraction > 0f) View.VISIBLE else View.GONE
+            watchProgress.progress = ((history?.fraction ?: 0f) * 100).toInt()
+            subBadge.visibility = if (v.subKo != null) View.VISIBLE else View.GONE
             thumb.setImageBitmap(v.thumbFile?.let { Thumbs.get(it) })
             badge.visibility = if (v.audioOnly) View.VISIBLE else View.GONE
             playing.visibility = if (v.id == playingId) View.VISIBLE else View.GONE
@@ -70,4 +82,15 @@ fun formatDuration(sec: Long): String? {
     val m = sec % 3600 / 60
     val s = sec % 60
     return if (h > 0) String.format("%d:%02d:%02d", h, m, s) else String.format("%d:%02d", m, s)
+}
+
+fun timeAgo(at: Long): String {
+    val diff = (System.currentTimeMillis() - at) / 1000
+    return when {
+        diff < 60 -> "방금"
+        diff < 3600 -> "${diff / 60}분 전"
+        diff < 86_400 -> "${diff / 3600}시간 전"
+        diff < 86_400 * 30 -> "${diff / 86_400}일 전"
+        else -> "${diff / (86_400 * 30)}달 전"
+    }
 }

@@ -1,6 +1,7 @@
 package com.joyong.ytsaver
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -44,7 +45,12 @@ object YouTubeSaver {
     private const val CHUNK = 8L * 1024 * 1024
     private val URL_REGEX = Regex("""https?://\S+""")
 
-    data class Progress(val title: String, val done: Long, val total: Long)
+    data class Progress(
+        val title: String,
+        val done: Long,
+        val total: Long,
+        val status: String? = null,
+    )
 
     /** 공유 문구("제목 https://youtu.be/…")에서도 링크만 뽑아낸다. */
     fun extractUrl(text: String): String? =
@@ -60,16 +66,13 @@ object YouTubeSaver {
         context: Context,
         url: String,
         quality: Quality,
+        withSubtitles: Boolean,
         onProgress: (Progress) -> Unit,
     ): SavedVideo = withContext(Dispatchers.IO) {
         val id = videoId(url)
         Library.find(context, id)?.let { throw SaveException("이미 저장된 영상이에요: ${it.title}") }
 
-        val info = try {
-            StreamInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/watch?v=$id")
-        } catch (e: Exception) {
-            throw SaveException(describe(e))
-        }
+        val info = fetchInfo(id)
         val title = info.name ?: id
         onProgress(Progress(title, 0, 0))
 
@@ -105,19 +108,60 @@ object YouTubeSaver {
             val thumb = info.thumbnails.minByOrNull { kotlin.math.abs(it.width - 480) }?.url
             val hasThumb = thumb != null && runCatching { downloadSimple(thumb, thumbFile) }.isSuccess
 
-            val qualityLabel = when {
-                video == null -> "소리만"
-                else -> "${video.height}p"
-            }
+            // 자막은 실패해도 영상 저장은 그대로 완료
+            val subs = if (withSubtitles) {
+                runCatching {
+                    SubtitleSaver.save(dir, info.subtitles) { onProgress(Progress(title, 0, 0, it)) }
+                }.onFailure { if (it is CancellationException) throw it }.getOrNull()
+            } else null
+
             Library.writeMeta(
-                dir, id, title, info.uploaderName ?: "", info.duration, qualityLabel,
-                videoFile, audioFile, if (hasThumb) thumbFile else null,
+                SavedVideo(
+                    id = id,
+                    title = title,
+                    uploader = info.uploaderName ?: "",
+                    durationSec = info.duration,
+                    quality = if (video == null) "소리만" else "${video.height}p",
+                    savedAt = System.currentTimeMillis(),
+                    dir = dir,
+                    videoFile = videoFile,
+                    audioFile = audioFile,
+                    thumbFile = if (hasThumb) thumbFile else null,
+                    subKo = subs?.ko,
+                    subOrig = subs?.orig,
+                    subOrigLang = subs?.origLang.orEmpty(),
+                )
             )
             Library.find(context, id) ?: throw SaveException("저장된 파일을 읽지 못했어요")
         } catch (e: Throwable) {
             dir.deleteRecursively()
             throw e
         }
+    }
+
+    /** 이미 저장한 영상에 한국어 자막만 새로 받아 붙인다. */
+    suspend fun addSubtitles(
+        context: Context,
+        video: SavedVideo,
+        onProgress: (Progress) -> Unit,
+    ): SavedVideo = withContext(Dispatchers.IO) {
+        onProgress(Progress(video.title, 0, 0, "자막 정보 가져오는 중…"))
+        val info = fetchInfo(video.id)
+        if (info.subtitles.isEmpty()) throw SaveException("이 영상에는 유튜브 자막이 없어요")
+        val subs = SubtitleSaver.save(video.dir, info.subtitles) {
+            onProgress(Progress(video.title, 0, 0, it))
+        }
+        if (subs.ko == null) throw SaveException("한국어 자막을 만들지 못했어요")
+        Library.writeMeta(
+            video.copy(subKo = subs.ko, subOrig = subs.orig, subOrigLang = subs.origLang)
+        )
+        Library.find(context, video.id) ?: video
+    }
+
+    private fun fetchInfo(id: String): StreamInfo = try {
+        StreamInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/watch?v=$id")
+    } catch (e: Exception) {
+        throw SaveException(describe(e))
     }
 
     private fun Stream.usable() = isUrl && deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP

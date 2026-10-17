@@ -45,6 +45,15 @@
             </intent-filter>
         </service>
 
+        <!-- 앱이 꺼진 뒤 블루투스/이어폰 재생 버튼으로 마지막 재생을 이어서 -->
+        <receiver
+            android:name="androidx.media3.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
         <service
             android:name=".DownloadService"
             android:exported="false"
