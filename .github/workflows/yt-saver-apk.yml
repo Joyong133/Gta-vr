@@ -1,0 +1,74 @@
+# 튜브 보관함 안드로이드 APK 빌드 → GitHub Release에 업로드
+# 휴대폰에서 Releases 페이지의 tube-box.apk 를 받아 설치하면 됩니다.
+name: Tube Box APK
+
+on:
+  push:
+    paths:
+      - 'yt-saver-app/**'
+      - '.github/workflows/yt-saver-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: yt-saver-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build release APK
+        working-directory: yt-saver-app/android
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          gradle assembleRelease --no-daemon --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/tube-box.apk"
+          ls -la "$GITHUB_WORKSPACE/tube-box.apk"
+
+      - name: Verify APK contents
+        run: |
+          unzip -l tube-box.apk | grep -E "classes.dex|AndroidManifest.xml"
+          "$ANDROID_HOME"/build-tools/$(ls "$ANDROID_HOME"/build-tools | sort -V | tail -1)/apksigner verify --print-certs tube-box.apk | head -5
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tube-box-apk
+          path: tube-box.apk
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: tube-box-v1.0.${{ github.run_number }}
+          name: 튜브 보관함 v1.0.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          make_latest: false
+          files: tube-box.apk
+          body: |
+            ## 📱 설치 방법
+            1. 휴대폰에서 아래 **tube-box.apk** 를 눌러 다운로드
+            2. 다운로드 완료 알림을 눌러 설치 (처음이면 "출처를 알 수 없는 앱 설치 허용" 필요)
+            3. 이전 버전이 설치되어 있으면 그대로 업데이트되고 저장한 영상은 유지돼요
+
+            ## ✨ 기능
+            - 유튜브 링크 붙여넣기 또는 유튜브 앱 **공유 → 튜브 보관함** 으로 바로 저장
+            - 화질 선택: 1080p / 720p / 480p / 360p / 소리만
+            - 저장한 영상은 **인터넷 없이** 재생
+            - 앱을 내리거나 화면을 꺼도 소리 계속 재생 (알림창·잠금화면 컨트롤)
+            - 보관함 전체 연속 재생, 반복·셔플, 전체화면
+
+            커밋: ${{ github.sha }}

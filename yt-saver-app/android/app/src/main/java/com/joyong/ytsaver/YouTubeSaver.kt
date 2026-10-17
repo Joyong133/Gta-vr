@@ -1,0 +1,226 @@
+package com.joyong.ytsaver
+
+import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
+import okhttp3.Request
+import org.schabi.newpipe.extractor.MediaFormat
+import org.schabi.newpipe.extractor.ServiceList
+import org.schabi.newpipe.extractor.exceptions.AgeRestrictedContentException
+import org.schabi.newpipe.extractor.exceptions.ContentNotAvailableException
+import org.schabi.newpipe.extractor.exceptions.GeographicRestrictionException
+import org.schabi.newpipe.extractor.exceptions.PaidContentException
+import org.schabi.newpipe.extractor.exceptions.PrivateContentException
+import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
+import org.schabi.newpipe.extractor.exceptions.SignInConfirmNotBotException
+import org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper
+import org.schabi.newpipe.extractor.stream.AudioStream
+import org.schabi.newpipe.extractor.stream.AudioTrackType
+import org.schabi.newpipe.extractor.stream.DeliveryMethod
+import org.schabi.newpipe.extractor.stream.Stream
+import org.schabi.newpipe.extractor.stream.StreamInfo
+import org.schabi.newpipe.extractor.stream.VideoStream
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.net.UnknownHostException
+import kotlin.coroutines.coroutineContext
+
+enum class Quality(val label: String, val maxHeight: Int) {
+    P1080("1080p", 1080),
+    P720("720p", 720),
+    P480("480p", 480),
+    P360("360p", 360),
+    AUDIO("소리만", 0),
+}
+
+class SaveException(message: String) : Exception(message)
+
+/** 유튜브 링크에서 스트림을 골라 기기에 저장한다. */
+object YouTubeSaver {
+
+    private const val CHUNK = 8L * 1024 * 1024
+    private val URL_REGEX = Regex("""https?://\S+""")
+
+    data class Progress(val title: String, val done: Long, val total: Long)
+
+    /** 공유 문구("제목 https://youtu.be/…")에서도 링크만 뽑아낸다. */
+    fun extractUrl(text: String): String? =
+        URL_REGEX.find(text.trim())?.value ?: text.trim().takeIf { it.isNotEmpty() }
+
+    fun videoId(url: String): String = try {
+        ServiceList.YouTube.streamLHFactory.getId(url)
+    } catch (e: Exception) {
+        throw SaveException("유튜브 영상 링크가 아니에요")
+    }
+
+    suspend fun save(
+        context: Context,
+        url: String,
+        quality: Quality,
+        onProgress: (Progress) -> Unit,
+    ): SavedVideo = withContext(Dispatchers.IO) {
+        val id = videoId(url)
+        Library.find(context, id)?.let { throw SaveException("이미 저장된 영상이에요: ${it.title}") }
+
+        val info = try {
+            StreamInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/watch?v=$id")
+        } catch (e: Exception) {
+            throw SaveException(describe(e))
+        }
+        val title = info.name ?: id
+        onProgress(Progress(title, 0, 0))
+
+        val audio = pickAudio(info.audioStreams)
+        val video = if (quality == Quality.AUDIO) null else pickVideo(info, quality.maxHeight)
+        // 소리가 포함된 일반 영상 스트림을 골랐다면 별도 오디오 파일은 필요 없다
+        val needAudio = video == null || video.isVideoOnly
+        if (video == null && audio == null) throw SaveException("저장할 수 있는 스트림을 찾지 못했어요")
+        if (needAudio && audio == null) throw SaveException("소리 스트림을 찾지 못했어요")
+
+        val dir = Library.dirFor(context, id)
+        dir.deleteRecursively()
+        dir.mkdirs()
+        try {
+            val videoFile = video?.let { File(dir, "video.${it.format?.suffix ?: "mp4"}") }
+            val audioFile = if (needAudio) File(dir, "audio.${audio!!.format?.suffix ?: "m4a"}") else null
+
+            val videoLen = video?.itagItem?.contentLength ?: -1L
+            val audioLen = if (needAudio) audio?.itagItem?.contentLength ?: -1L else 0L
+            val total = if (videoLen >= 0 && audioLen >= 0) videoLen + audioLen else 0L
+            var finished = 0L
+            val report = { bytes: Long -> onProgress(Progress(title, finished + bytes, total)) }
+
+            if (video != null && videoFile != null) {
+                download(video.content, videoFile, report)
+                finished += videoFile.length()
+            }
+            if (audioFile != null) {
+                download(audio!!.content, audioFile, report)
+            }
+
+            val thumbFile = File(dir, "thumb.jpg")
+            val thumb = info.thumbnails.minByOrNull { kotlin.math.abs(it.width - 480) }?.url
+            val hasThumb = thumb != null && runCatching { downloadSimple(thumb, thumbFile) }.isSuccess
+
+            val qualityLabel = when {
+                video == null -> "소리만"
+                else -> "${video.height}p"
+            }
+            Library.writeMeta(
+                dir, id, title, info.uploaderName ?: "", info.duration, qualityLabel,
+                videoFile, audioFile, if (hasThumb) thumbFile else null,
+            )
+            Library.find(context, id) ?: throw SaveException("저장된 파일을 읽지 못했어요")
+        } catch (e: Throwable) {
+            dir.deleteRecursively()
+            throw e
+        }
+    }
+
+    private fun Stream.usable() = isUrl && deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP
+
+    private fun pickAudio(streams: List<AudioStream>): AudioStream? {
+        val usable = streams.filter { it.usable() }
+        // 더빙 트랙이 여러 개인 영상은 원본 언어 트랙을 우선
+        val original = usable.filter {
+            it.audioTrackType == null || it.audioTrackType == AudioTrackType.ORIGINAL
+        }.ifEmpty { usable }
+        return original.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
+            ?: original.maxByOrNull { it.averageBitrate }
+    }
+
+    private fun pickVideo(info: StreamInfo, maxHeight: Int): VideoStream? {
+        val byQuality = compareBy<VideoStream>({ it.height }, { it.bitrate })
+        val videoOnly = info.videoOnlyStreams.filter { it.usable() }
+        val muxed = info.videoStreams.filter { it.usable() }
+        fun VideoStream.isAvc() = format == MediaFormat.MPEG_4 && codec?.startsWith("avc1") == true
+        fun VideoStream.isAv1() = codec?.startsWith("av01") == true
+
+        // 1) 거의 모든 폰이 하드웨어로 재생하는 H.264(MP4)
+        videoOnly.filter { it.isAvc() && it.height in 1..maxHeight }.maxWithOrNull(byQuality)
+            ?.let { return it }
+        // 2) 소리가 같이 들어 있는 일반 MP4
+        muxed.filter { it.height in 1..maxHeight }.maxWithOrNull(byQuality)?.let { return it }
+        // 3) 그 외(VP9 등). AV1은 지원하지 않는 기기가 많아 제외
+        videoOnly.filter { !it.isAv1() && it.height in 1..maxHeight }.maxWithOrNull(byQuality)
+            ?.let { return it }
+        // 4) 원하는 화질 이하가 없으면 가장 낮은 화질
+        return (videoOnly.filter { it.isAvc() } + muxed).minWithOrNull(byQuality)
+            ?: videoOnly.filter { !it.isAv1() }.minWithOrNull(byQuality)
+    }
+
+    /** 유튜브 서버가 한 번에 큰 요청을 끊는 경우가 있어 구간(Range)으로 나눠 받는다. */
+    private suspend fun download(url: String, file: File, onBytes: (Long) -> Unit) {
+        val userAgent = YoutubeParsingHelper.getVisionOsUserAgent(null)
+        var pos = 0L
+        var total = -1L
+        val buffer = ByteArray(64 * 1024)
+        FileOutputStream(file).use { out ->
+            while (total < 0 || pos < total) {
+                var attempt = 0
+                while (true) {
+                    coroutineContext.ensureActive()
+                    try {
+                        val request = Request.Builder()
+                            .url(url)
+                            .header("User-Agent", userAgent)
+                            .header("Range", "bytes=$pos-${pos + CHUNK - 1}")
+                            .build()
+                        App.http.newCall(request).execute().use { resp ->
+                            if (resp.code != 200 && resp.code != 206) {
+                                throw IOException("HTTP ${resp.code}")
+                            }
+                            if (total < 0) {
+                                total = resp.header("Content-Range")?.substringAfterLast('/')
+                                    ?.toLongOrNull()
+                                    ?: resp.body?.contentLength()?.takeIf { it >= 0 }
+                                    ?: throw IOException("파일 크기를 알 수 없어요")
+                            }
+                            if (resp.code == 200 && pos > 0) {
+                                throw IOException("서버가 이어받기를 지원하지 않아요")
+                            }
+                            val input = resp.body!!.byteStream()
+                            while (true) {
+                                coroutineContext.ensureActive()
+                                val n = input.read(buffer)
+                                if (n < 0) break
+                                out.write(buffer, 0, n)
+                                pos += n
+                                onBytes(pos)
+                            }
+                        }
+                        break
+                    } catch (e: IOException) {
+                        if (++attempt >= 5) throw SaveException(describe(e))
+                        delay(1500L * attempt)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun downloadSimple(url: String, file: File) {
+        val request = Request.Builder().url(url).header("User-Agent", NetDownloader.USER_AGENT).build()
+        App.http.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
+            file.outputStream().use { resp.body!!.byteStream().copyTo(it) }
+        }
+    }
+
+    fun describe(e: Throwable): String = when (e) {
+        is SaveException -> e.message ?: "저장하지 못했어요"
+        is AgeRestrictedContentException -> "연령 제한 영상은 로그인 없이 저장할 수 없어요"
+        is PrivateContentException -> "비공개 영상이에요"
+        is PaidContentException -> "유료(멤버십) 영상은 저장할 수 없어요"
+        is GeographicRestrictionException -> "이 지역에서 볼 수 없는 영상이에요"
+        is SignInConfirmNotBotException, is ReCaptchaException ->
+            "유튜브가 잠시 요청을 막았어요. 잠시 후 다시 시도해 주세요"
+        is ContentNotAvailableException -> "볼 수 없는 영상이에요 (${e.message})"
+        is UnknownHostException -> "인터넷 연결을 확인해 주세요"
+        is IOException -> "네트워크 오류: ${e.message}"
+        else -> "저장하지 못했어요: ${e.message ?: e.javaClass.simpleName}"
+    }
+}
