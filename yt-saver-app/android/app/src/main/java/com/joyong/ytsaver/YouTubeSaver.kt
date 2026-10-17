@@ -7,7 +7,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.Request
-import org.schabi.newpipe.extractor.MediaFormat
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.exceptions.AgeRestrictedContentException
 import org.schabi.newpipe.extractor.exceptions.ContentNotAvailableException
@@ -16,13 +15,6 @@ import org.schabi.newpipe.extractor.exceptions.PaidContentException
 import org.schabi.newpipe.extractor.exceptions.PrivateContentException
 import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
 import org.schabi.newpipe.extractor.exceptions.SignInConfirmNotBotException
-import org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper
-import org.schabi.newpipe.extractor.stream.AudioStream
-import org.schabi.newpipe.extractor.stream.AudioTrackType
-import org.schabi.newpipe.extractor.stream.DeliveryMethod
-import org.schabi.newpipe.extractor.stream.Stream
-import org.schabi.newpipe.extractor.stream.StreamInfo
-import org.schabi.newpipe.extractor.stream.VideoStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -73,13 +65,13 @@ object YouTubeSaver {
         Library.find(context, id)?.let { throw SaveException("이미 저장된 영상이에요: ${it.title}") }
 
         val info = fetchInfo(id)
-        val title = info.name ?: id
+        val title = info.title
         onProgress(Progress(title, 0, 0))
 
-        val audio = pickAudio(info.audioStreams)
-        val video = if (quality == Quality.AUDIO) null else pickVideo(info, quality.maxHeight)
+        val audio = pickAudio(info.streams)
+        val video = if (quality == Quality.AUDIO) null else pickVideo(info.streams, quality.maxHeight)
         // 소리가 포함된 일반 영상 스트림을 골랐다면 별도 오디오 파일은 필요 없다
-        val needAudio = video == null || video.isVideoOnly
+        val needAudio = video == null || video.kind == MediaStream.Kind.VIDEO_ONLY
         if (video == null && audio == null) throw SaveException("저장할 수 있는 스트림을 찾지 못했어요")
         if (needAudio && audio == null) throw SaveException("소리 스트림을 찾지 못했어요")
 
@@ -87,31 +79,31 @@ object YouTubeSaver {
         dir.deleteRecursively()
         dir.mkdirs()
         try {
-            val videoFile = video?.let { File(dir, "video.${it.format?.suffix ?: "mp4"}") }
-            val audioFile = if (needAudio) File(dir, "audio.${audio!!.format?.suffix ?: "m4a"}") else null
+            val videoFile = video?.let { File(dir, "video.${it.ext}") }
+            val audioFile = if (needAudio) File(dir, "audio.${audio!!.ext}") else null
 
-            val videoLen = video?.itagItem?.contentLength ?: -1L
-            val audioLen = if (needAudio) audio?.itagItem?.contentLength ?: -1L else 0L
+            val videoLen = video?.contentLength ?: -1L
+            val audioLen = if (needAudio) audio?.contentLength ?: -1L else 0L
             val total = if (videoLen >= 0 && audioLen >= 0) videoLen + audioLen else 0L
             var finished = 0L
             val report = { bytes: Long -> onProgress(Progress(title, finished + bytes, total)) }
 
             if (video != null && videoFile != null) {
-                download(video.content, videoFile, report)
+                download(video.url, videoFile, info.userAgent, report)
                 finished += videoFile.length()
             }
             if (audioFile != null) {
-                download(audio!!.content, audioFile, report)
+                download(audio!!.url, audioFile, info.userAgent, report)
             }
 
             val thumbFile = File(dir, "thumb.jpg")
-            val thumb = info.thumbnails.minByOrNull { kotlin.math.abs(it.width - 480) }?.url
+            val thumb = info.thumbnailUrl
             val hasThumb = thumb != null && runCatching { downloadSimple(thumb, thumbFile) }.isSuccess
 
             // 자막은 실패해도 영상 저장은 그대로 완료
             val subs = if (withSubtitles) {
                 runCatching {
-                    SubtitleSaver.save(dir, info.subtitles) { onProgress(Progress(title, 0, 0, it)) }
+                    SubtitleSaver.save(dir, info.captions) { onProgress(Progress(title, 0, 0, it)) }
                 }.onFailure { if (it is CancellationException) throw it }.getOrNull()
             } else null
 
@@ -119,8 +111,8 @@ object YouTubeSaver {
                 SavedVideo(
                     id = id,
                     title = title,
-                    uploader = info.uploaderName ?: "",
-                    durationSec = info.duration,
+                    uploader = info.uploader,
+                    durationSec = info.durationSec,
                     quality = if (video == null) "소리만" else "${video.height}p",
                     savedAt = System.currentTimeMillis(),
                     dir = dir,
@@ -147,8 +139,8 @@ object YouTubeSaver {
     ): SavedVideo = withContext(Dispatchers.IO) {
         onProgress(Progress(video.title, 0, 0, "자막 정보 가져오는 중…"))
         val info = fetchInfo(video.id)
-        if (info.subtitles.isEmpty()) throw SaveException("이 영상에는 유튜브 자막이 없어요")
-        val subs = SubtitleSaver.save(video.dir, info.subtitles) {
+        if (info.captions.isEmpty()) throw SaveException("이 영상에는 유튜브 자막이 없어요")
+        val subs = SubtitleSaver.save(video.dir, info.captions) {
             onProgress(Progress(video.title, 0, 0, it))
         }
         if (subs.ko == null) throw SaveException("한국어 자막을 만들지 못했어요")
@@ -158,47 +150,40 @@ object YouTubeSaver {
         Library.find(context, video.id) ?: video
     }
 
-    private fun fetchInfo(id: String): StreamInfo = try {
-        StreamInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/watch?v=$id")
+    private fun fetchInfo(id: String): VideoInfo = try {
+        VideoSource.fetch(id)
     } catch (e: Exception) {
         throw SaveException(describe(e), e)
     }
 
-    private fun Stream.usable() = isUrl && deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP
-
-    private fun pickAudio(streams: List<AudioStream>): AudioStream? {
-        val usable = streams.filter { it.usable() }
+    private fun pickAudio(streams: List<MediaStream>): MediaStream? {
+        val audio = streams.filter { it.kind == MediaStream.Kind.AUDIO }
         // 더빙 트랙이 여러 개인 영상은 원본 언어 트랙을 우선
-        val original = usable.filter {
-            it.audioTrackType == null || it.audioTrackType == AudioTrackType.ORIGINAL
-        }.ifEmpty { usable }
-        return original.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
-            ?: original.maxByOrNull { it.averageBitrate }
+        val original = audio.filter { it.originalAudio }.ifEmpty { audio }
+        return original.filter { it.ext == "m4a" }.maxByOrNull { it.bitrate }
+            ?: original.maxByOrNull { it.bitrate }
     }
 
-    private fun pickVideo(info: StreamInfo, maxHeight: Int): VideoStream? {
-        val byQuality = compareBy<VideoStream>({ it.height }, { it.bitrate })
-        val videoOnly = info.videoOnlyStreams.filter { it.usable() }
-        val muxed = info.videoStreams.filter { it.usable() }
-        fun VideoStream.isAvc() = format == MediaFormat.MPEG_4 && codec?.startsWith("avc1") == true
-        fun VideoStream.isAv1() = codec?.startsWith("av01") == true
+    private fun pickVideo(streams: List<MediaStream>, maxHeight: Int): MediaStream? {
+        val byQuality = compareBy<MediaStream>({ it.height }, { it.bitrate })
+        val videoOnly = streams.filter { it.kind == MediaStream.Kind.VIDEO_ONLY }
+        val muxed = streams.filter { it.kind == MediaStream.Kind.MUXED }
 
         // 1) 거의 모든 폰이 하드웨어로 재생하는 H.264(MP4)
-        videoOnly.filter { it.isAvc() && it.height in 1..maxHeight }.maxWithOrNull(byQuality)
+        videoOnly.filter { it.isAvc && it.height in 1..maxHeight }.maxWithOrNull(byQuality)
             ?.let { return it }
         // 2) 소리가 같이 들어 있는 일반 MP4
         muxed.filter { it.height in 1..maxHeight }.maxWithOrNull(byQuality)?.let { return it }
         // 3) 그 외(VP9 등). AV1은 지원하지 않는 기기가 많아 제외
-        videoOnly.filter { !it.isAv1() && it.height in 1..maxHeight }.maxWithOrNull(byQuality)
+        videoOnly.filter { !it.isAv1 && it.height in 1..maxHeight }.maxWithOrNull(byQuality)
             ?.let { return it }
         // 4) 원하는 화질 이하가 없으면 가장 낮은 화질
-        return (videoOnly.filter { it.isAvc() } + muxed).minWithOrNull(byQuality)
-            ?: videoOnly.filter { !it.isAv1() }.minWithOrNull(byQuality)
+        return (videoOnly.filter { it.isAvc } + muxed).minWithOrNull(byQuality)
+            ?: videoOnly.filter { !it.isAv1 }.minWithOrNull(byQuality)
     }
 
     /** 유튜브 서버가 한 번에 큰 요청을 끊는 경우가 있어 구간(Range)으로 나눠 받는다. */
-    private suspend fun download(url: String, file: File, onBytes: (Long) -> Unit) {
-        val userAgent = YoutubeParsingHelper.getVisionOsUserAgent(null)
+    private suspend fun download(url: String, file: File, userAgent: String, onBytes: (Long) -> Unit) {
         var pos = 0L
         var total = -1L
         val buffer = ByteArray(64 * 1024)
@@ -267,7 +252,11 @@ object YouTubeSaver {
     /** 원인 추적용 자세한 오류 (예외 종류와 유튜브가 준 사유) */
     fun detail(e: Throwable): String {
         val chain = generateSequence(e) { it.cause }.take(4).toList()
-        return chain.joinToString("\n← ") { "${it.javaClass.simpleName}: ${it.message ?: ""}" }
+        val main = chain.joinToString("\n← ") { "${it.javaClass.simpleName}: ${it.message ?: ""}" }
+        // 대체 클라이언트(TV, VR)로 다시 시도한 결과
+        val fallbacks = chain.flatMap { it.suppressed.toList() }
+            .joinToString("") { "\n+ ${it.javaClass.simpleName}: ${it.message ?: ""}" }
+        return main + fallbacks
     }
 
     fun describe(e: Throwable): String = when (e) {

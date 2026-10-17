@@ -23,7 +23,8 @@
 ## 구조
 | 파일 | 역할 |
 | --- | --- |
-| `YouTubeSaver.kt` | NewPipeExtractor로 스트림을 찾고 화질에 맞는 영상·소리 파일을 구간 단위로 내려받음 |
+| `VideoSource.kt` | 영상 정보 가져오기. 기본은 NewPipeExtractor, 막히면 TV/VR 클라이언트로 직접 요청 |
+| `YouTubeSaver.kt` | 스트림을 찾고 화질에 맞는 영상·소리 파일을 구간 단위로 내려받음 |
 | `DownloadService.kt` | 앱을 내려도 저장이 계속되도록 포그라운드 서비스에서 대기열 처리 |
 | `Library.kt` | `Android/data/com.joyong.ytsaver/files/videos/<영상ID>/` 에 파일과 `meta.json` 보관 |
 | `SubtitleSaver.kt` | 유튜브 자막(json3)을 받아 한국어로 번역해 WebVTT로 저장 |
@@ -42,8 +43,11 @@
 - **reCAPTCHA(HTTP 429)**: 오류 창의 **로봇 확인하기** → 앱 안에서 유튜브 확인 페이지를 풀면
   구글이 주는 `GOOGLE_ABUSE_EXEMPTION` 쿠키를 저장해 이후 요청에 붙이고, 실패한 저장을 다시 시도.
   (NewPipe와 같은 방식)
-- **Sign in to confirm you're not a bot**: 지금 쓰는 IP 자체를 막은 것이라 앱에서 풀 방법이 없음.
-  와이파이↔데이터 전환, VPN 끄기, 시간 두고 재시도.
+- **Sign in to confirm you're not a bot**: NewPipeExtractor는 VisionOS 클라이언트로만 요청하는데,
+  유튜브는 클라이언트마다 다르게 막는다. 그래서 이 경우 `VideoSource.kt`가 yt-dlp의 클라이언트 설정을
+  참고해 **TV(삼성 TVHTML5)** → **Oculus VR(ANDROID_VR)** 순서로 `/youtubei/v1/player`에 직접 요청한다.
+  TV 클라이언트의 서명/n 파라미터는 NewPipeExtractor의 `YoutubeJavaScriptPlayerManager`로 푼다.
+  모두 막히면 와이파이↔데이터 전환, VPN 끄기, 시간 두고 재시도. 자세한 오류에 각 클라이언트 결과(`+ ...`)가 나온다.
 - 오류 창의 "자세한 오류"에 예외 종류와 유튜브가 준 사유가 나오고 **오류 복사**로 복사 가능.
 
 ## 주의
