@@ -45,7 +45,7 @@
   (NewPipe와 같은 방식)
 - **Sign in to confirm you're not a bot**: NewPipeExtractor는 VisionOS 클라이언트로만 요청하는데,
   유튜브는 클라이언트마다 다르게 막는다. 그래서 이 경우 `VideoSource.kt`가 yt-dlp의 클라이언트 설정을
-  참고해 **TV(삼성 TVHTML5)** → **Oculus VR(ANDROID_VR)** 순서로 `/youtubei/v1/player`에 직접 요청한다.
+  참고해 **TV(삼성 TVHTML5)** → **퍼가기 플레이어(WEB_EMBEDDED_PLAYER)** → **Oculus VR(ANDROID_VR)** 순서로 `/youtubei/v1/player`에 직접 요청한다.
   TV 클라이언트의 서명/n 파라미터는 NewPipeExtractor의 `YoutubeJavaScriptPlayerManager`로 푼다.
   모두 막히면 와이파이↔데이터 전환, VPN 끄기, 시간 두고 재시도. 자세한 오류에 각 클라이언트 결과(`+ ...`)가 나온다.
 - 오류 창의 "자세한 오류"에 예외 종류와 유튜브가 준 사유가 나오고 **오류 복사**로 복사 가능.

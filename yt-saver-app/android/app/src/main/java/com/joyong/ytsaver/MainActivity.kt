@@ -87,6 +87,8 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
+        b.toolbar.subtitle = "v${App.versionName}"
+
         adapter = VideoAdapter(
             onClick = ::play,
             onLongClick = ::showItemMenu,

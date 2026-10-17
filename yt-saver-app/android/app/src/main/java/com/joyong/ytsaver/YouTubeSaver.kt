@@ -251,16 +251,19 @@ object YouTubeSaver {
 
     /** 원인 추적용 자세한 오류 (예외 종류와 유튜브가 준 사유) */
     fun detail(e: Throwable): String {
-        val chain = generateSequence(e) { it.cause }.take(4).toList()
-        val main = chain.joinToString("\n← ") { "${it.javaClass.simpleName}: ${it.message ?: ""}" }
-        // 대체 클라이언트(TV, VR)로 다시 시도한 결과
-        val fallbacks = chain.flatMap { it.suppressed.toList() }
-            .joinToString("") { "\n+ ${it.javaClass.simpleName}: ${it.message ?: ""}" }
-        return main + fallbacks
+        val chain = generateSequence(e) { it.cause }.take(5).toList()
+        val main = chain.filterNot { it is AllClientsFailedException }
+            .joinToString("\n← ") { "${it.javaClass.simpleName}: ${it.message ?: ""}" }
+        // 대체 클라이언트(TV, 퍼가기, VR)로 다시 시도한 결과
+        val attempts = chain.filterIsInstance<AllClientsFailedException>()
+            .flatMap { it.attempts }
+            .joinToString("") { "\n+ $it" }
+        return "앱 버전 ${App.versionName}\n$main$attempts"
     }
 
     fun describe(e: Throwable): String = when (e) {
         is SaveException -> e.message ?: "저장하지 못했어요"
+        is AllClientsFailedException -> describe(e.cause ?: e) + " (TV·퍼가기·VR 방식도 모두 막힘)"
         is AgeRestrictedContentException -> "연령 제한 영상은 로그인 없이 저장할 수 없어요"
         is PrivateContentException -> "비공개 영상이에요"
         is PaidContentException -> "유료(멤버십) 영상은 저장할 수 없어요"

@@ -36,6 +36,12 @@ class App : Application() {
         lateinit var instance: App
             private set
 
+        val versionName: String by lazy {
+            runCatching {
+                instance.packageManager.getPackageInfo(instance.packageName, 0).versionName
+            }.getOrNull() ?: "?"
+        }
+
         val http: OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
