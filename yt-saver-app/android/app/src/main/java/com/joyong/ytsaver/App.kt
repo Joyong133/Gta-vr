@@ -13,7 +13,12 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        NewPipe.init(NetDownloader(http), Localization("ko", "KR"), ContentCountry("KR"))
+        instance = this
+        NewPipe.init(
+            NetDownloader(http) { CaptchaCookies.get(this) },
+            Localization("ko", "KR"),
+            ContentCountry("KR"),
+        )
 
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
@@ -27,6 +32,9 @@ class App : Application() {
     companion object {
         const val CHANNEL_DOWNLOAD = "download"
         const val CHANNEL_DONE = "download_done"
+
+        lateinit var instance: App
+            private set
 
         val http: OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)

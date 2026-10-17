@@ -120,10 +120,17 @@ class DownloadService : Service() {
                 notifyDone(note, saved.title)
             }
         } catch (e: CancellationException) {
-            _events.tryEmit(Event.Failed("저장을 취소했어요"))
+            _events.tryEmit(Event.Cancelled)
         } catch (e: Exception) {
             val msg = YouTubeSaver.describe(e)
-            _events.tryEmit(Event.Failed(msg))
+            lastFailedTask = task
+            // 앱이 내려가 있을 때 실패해도 다시 열면 볼 수 있도록 상태로 남긴다
+            _failure.value = Failure(
+                title = if (task.subtitleFor != null) "자막 저장 실패" else "저장 실패",
+                message = msg,
+                detail = YouTubeSaver.detail(e),
+                captchaUrl = YouTubeSaver.captchaUrl(e),
+            )
             notifyDone("저장 실패", msg)
         } finally {
             _state.value = DownloadState.Idle
@@ -196,8 +203,16 @@ class DownloadService : Service() {
 
     sealed interface Event {
         data class Saved(val title: String, val note: String) : Event
-        data class Failed(val message: String) : Event
+        data object Cancelled : Event
     }
+
+    data class Failure(
+        val title: String,
+        val message: String,
+        val detail: String,
+        /** 유튜브가 reCAPTCHA를 요구한 경우 확인 페이지 주소 */
+        val captchaUrl: String?,
+    )
 
     companion object {
         private const val NOTIFICATION_ID = 1
@@ -212,6 +227,28 @@ class DownloadService : Service() {
 
         private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 16)
         val events: SharedFlow<Event> = _events
+
+        private val _failure = MutableStateFlow<Failure?>(null)
+        val failure: StateFlow<Failure?> = _failure
+
+        private var lastFailedTask: Task? = null
+
+        fun clearFailure() {
+            _failure.value = null
+        }
+
+        /** 마지막으로 실패한 저장을 같은 설정으로 다시 시도 */
+        fun retryLast(context: Context): Boolean {
+            val task = lastFailedTask ?: return false
+            lastFailedTask = null
+            val intent = Intent(context, DownloadService::class.java)
+                .putExtra(EXTRA_URL, task.url)
+                .putExtra(EXTRA_QUALITY, task.quality.name)
+                .putExtra(EXTRA_SUBTITLES, task.withSubtitles)
+                .putExtra(EXTRA_SUBTITLE_FOR, task.subtitleFor)
+            ContextCompat.startForegroundService(context, intent)
+            return true
+        }
 
         fun start(context: Context, url: String, quality: Quality, withSubtitles: Boolean) {
             val intent = Intent(context, DownloadService::class.java)

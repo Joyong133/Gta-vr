@@ -1,6 +1,7 @@
 package com.joyong.ytsaver
 
 import android.Manifest
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Intent
@@ -52,6 +53,14 @@ class MainActivity : AppCompatActivity() {
     private var videos: List<SavedVideo> = emptyList()
 
     private val prefs by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
+
+    private val captcha = registerForActivityResult(CaptchaActivity.Contract()) { passed ->
+        if (passed) {
+            if (!DownloadService.retryLast(this)) toast("확인 완료! 다시 저장해 보세요")
+        } else {
+            toast("로봇 확인을 마치지 못했어요")
+        }
+    }
 
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -144,9 +153,12 @@ class MainActivity : AppCompatActivity() {
                                 toast("${e.note}: ${e.title}")
                                 refreshList()
                             }
-                            is DownloadService.Event.Failed -> toast(e.message)
+                            DownloadService.Event.Cancelled -> toast("저장을 취소했어요")
                         }
                     }
+                }
+                launch {
+                    DownloadService.failure.collect { f -> if (f != null) showFailure(f) }
                 }
             }
         }
@@ -404,6 +416,25 @@ class MainActivity : AppCompatActivity() {
             requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
         ViewCompat.requestApplyInsets(b.root)
+    }
+
+    private fun showFailure(f: DownloadService.Failure) {
+        DownloadService.clearFailure()
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(f.title)
+            .setMessage("${f.message}\n\n[자세한 오류]\n${f.detail}")
+            .setNegativeButton("닫기", null)
+            .setNeutralButton("오류 복사") { _, _ ->
+                getSystemService(ClipboardManager::class.java)
+                    .setPrimaryClip(ClipData.newPlainText("오류", "${f.message}\n${f.detail}"))
+                toast("오류 내용을 복사했어요")
+            }
+        if (f.captchaUrl != null) {
+            dialog.setPositiveButton("로봇 확인하기") { _, _ -> captcha.launch(f.captchaUrl) }
+        } else {
+            dialog.setPositiveButton("다시 시도") { _, _ -> DownloadService.retryLast(this) }
+        }
+        dialog.show()
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()

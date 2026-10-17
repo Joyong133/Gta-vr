@@ -37,7 +37,7 @@ enum class Quality(val label: String, val maxHeight: Int) {
     AUDIO("소리만", 0),
 }
 
-class SaveException(message: String) : Exception(message)
+class SaveException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /** 유튜브 링크에서 스트림을 골라 기기에 저장한다. */
 object YouTubeSaver {
@@ -161,7 +161,7 @@ object YouTubeSaver {
     private fun fetchInfo(id: String): StreamInfo = try {
         StreamInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/watch?v=$id")
     } catch (e: Exception) {
-        throw SaveException(describe(e))
+        throw SaveException(describe(e), e)
     }
 
     private fun Stream.usable() = isUrl && deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP
@@ -238,7 +238,7 @@ object YouTubeSaver {
                         }
                         break
                     } catch (e: IOException) {
-                        if (++attempt >= 5) throw SaveException(describe(e))
+                        if (++attempt >= 5) throw SaveException(describe(e), e)
                         delay(1500L * attempt)
                     }
                 }
@@ -254,14 +254,33 @@ object YouTubeSaver {
         }
     }
 
+    /** 유튜브가 reCAPTCHA를 요구했다면 확인 페이지 주소 */
+    fun captchaUrl(e: Throwable): String? {
+        var t: Throwable? = e
+        while (t != null) {
+            if (t is ReCaptchaException) return t.url ?: "https://www.youtube.com"
+            t = t.cause
+        }
+        return null
+    }
+
+    /** 원인 추적용 자세한 오류 (예외 종류와 유튜브가 준 사유) */
+    fun detail(e: Throwable): String {
+        val chain = generateSequence(e) { it.cause }.take(4).toList()
+        return chain.joinToString("\n← ") { "${it.javaClass.simpleName}: ${it.message ?: ""}" }
+    }
+
     fun describe(e: Throwable): String = when (e) {
         is SaveException -> e.message ?: "저장하지 못했어요"
         is AgeRestrictedContentException -> "연령 제한 영상은 로그인 없이 저장할 수 없어요"
         is PrivateContentException -> "비공개 영상이에요"
         is PaidContentException -> "유료(멤버십) 영상은 저장할 수 없어요"
         is GeographicRestrictionException -> "이 지역에서 볼 수 없는 영상이에요"
-        is SignInConfirmNotBotException, is ReCaptchaException ->
-            "유튜브가 잠시 요청을 막았어요. 잠시 후 다시 시도해 주세요"
+        is ReCaptchaException ->
+            "유튜브가 로봇 확인(reCAPTCHA)을 요구해요. '로봇 확인하기'를 눌러 확인을 마치면 다시 저장돼요"
+        is SignInConfirmNotBotException ->
+            "유튜브가 지금 쓰는 인터넷(IP)을 로봇으로 의심해 막았어요. " +
+                "와이파이↔모바일 데이터를 바꾸거나 VPN을 끄고, 그래도 안 되면 몇 시간 뒤에 다시 시도해 주세요"
         is ContentNotAvailableException -> "볼 수 없는 영상이에요 (${e.message})"
         is UnknownHostException -> "인터넷 연결을 확인해 주세요"
         is IOException -> "네트워크 오류: ${e.message}"
