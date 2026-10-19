@@ -10,6 +10,11 @@ import android.content.pm.PackageManager
 import android.graphics.drawable.BitmapDrawable
 import android.os.Build
 import android.os.Bundle
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
+import android.view.WindowManager
 import android.text.InputType
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -65,6 +70,12 @@ class MainActivity : AppCompatActivity() {
     }
     private var controller: MediaController? = null
     private var fullscreen = false
+
+    /** 잠금 화면 위에 떠 있는 상태 (저장·삭제·설정을 숨김) */
+    private var locked = false
+    private val unlockReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = updateLockedUi()
+    }
     private var videos: List<SavedVideo> = emptyList()
 
     private val prefs by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
@@ -109,6 +120,17 @@ class MainActivity : AppCompatActivity() {
 
         updateAccountUi()
         b.toolbar.setOnMenuItemClickListener { item ->
+            if (item.itemId == MENU_LOCK) {
+                val on = !lockScreenEnabled()
+                prefs.edit().putBoolean("lock_screen", on).apply()
+                applyShowWhenLocked()
+                updateAccountUi()
+                toast(
+                    if (on) "켰어요: 재생 중에 화면을 끄면, 다시 켤 때 잠금 해제 없이 이 화면이 먼저 나와요"
+                    else "잠금화면에서 바로 보기를 껐어요"
+                )
+                return@setOnMenuItemClickListener true
+            }
             if (item.itemId == MENU_FOCUS) {
                 val on = !WatchHistory.focusMode(this)
                 prefs.edit().putBoolean("focus_mode", on).apply()
@@ -299,6 +321,42 @@ class MainActivity : AppCompatActivity() {
         }, MoreExecutors.directExecutor())
     }
 
+    override fun onResume() {
+        super.onResume()
+        ContextCompat.registerReceiver(
+            this, unlockReceiver, IntentFilter(Intent.ACTION_USER_PRESENT),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        updateLockedUi()
+    }
+
+    override fun onPause() {
+        runCatching { unregisterReceiver(unlockReceiver) }
+        super.onPause()
+    }
+
+    private fun lockScreenEnabled() = prefs.getBoolean("lock_screen", true)
+
+    /** 재생 중이고 설정이 켜져 있으면 잠금 화면 위에 이 화면을 띄운다 */
+    private fun applyShowWhenLocked() {
+        val playing = (controller?.mediaItemCount ?: 0) > 0
+        val show = lockScreenEnabled() && playing
+        if (Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(show)
+        } else {
+            @Suppress("DEPRECATION")
+            if (show) window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+            else window.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+        }
+    }
+
+    /** 잠금 화면 위에서는 재생·목록만, 잠금을 풀면 전체 기능 */
+    private fun updateLockedUi() {
+        locked = getSystemService(KeyguardManager::class.java).isKeyguardLocked
+        b.saveCard.isVisible = !locked && !fullscreen
+        updateAccountUi()
+    }
+
     override fun onStop() {
         // 화면이 안 보이는 동안은 영상 디코딩을 끄고 소리만 재생 (배터리 절약)
         controller?.let {
@@ -435,6 +493,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showItemMenu(video: SavedVideo) {
+        if (locked) {
+            toast("잠금을 풀면 메뉴를 쓸 수 있어요")
+            return
+        }
         val hasSubs = video.subKo != null
         val options = arrayOf(
             "🎧 배경 소리로 같이 듣기 (화면 없이 소리만)",
@@ -523,6 +585,7 @@ class MainActivity : AppCompatActivity() {
         if (!active && fullscreen) setFullscreen(false)
         b.playerView.isVisible = active
         b.nowPlayingBar.isVisible = active && !fullscreen
+        applyShowWhenLocked()
         val id = c?.currentMediaItem?.mediaId
         adapter.playingId = if (active) id else null
         syncBgUi()
@@ -683,6 +746,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateAccountUi() {
         val loggedIn = YouTubeAccount.isLoggedIn(this)
+        if (locked) {
+            b.toolbar.subtitle = "🔒 잠금 화면 · 잠금을 풀면 저장·설정을 쓸 수 있어요"
+            b.toolbar.menu.clear()
+            return
+        }
         val focus = WatchHistory.focusMode(this)
         b.toolbar.subtitle = "v${App.versionName}" +
             (if (loggedIn) " · 유튜브 로그인됨" else "") +
@@ -696,7 +764,11 @@ class MainActivity : AppCompatActivity() {
             .setCheckable(true)
             .setChecked(focus)
             .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
-        b.toolbar.menu.add(0, MENU_AI, 2, "Claude 번역 설정 (유료, 선택)")
+        b.toolbar.menu.add(0, MENU_LOCK, 2, "🔓 잠금화면에서 바로 보기")
+            .setCheckable(true)
+            .setChecked(lockScreenEnabled())
+            .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
+        b.toolbar.menu.add(0, MENU_AI, 3, "Claude 번역 설정 (유료, 선택)")
             .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
     }
 
@@ -704,6 +776,7 @@ class MainActivity : AppCompatActivity() {
         private const val MENU_LOGIN = 1
         private const val MENU_AI = 2
         private const val MENU_FOCUS = 3
+        private const val MENU_LOCK = 4
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
