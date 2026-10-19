@@ -20,6 +20,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
 import androidx.media3.session.MediaSessionService
@@ -36,6 +37,10 @@ class PlaybackService : MediaSessionService() {
 
     private var session: MediaSession? = null
     private lateinit var player: ExoPlayer
+
+    /** 영상과 동시에 틀어 두는 두 번째 소리 (화면 없이 소리만) */
+    private var bgSession: MediaSession? = null
+    private lateinit var bgPlayer: ExoPlayer
     private val handler = Handler(Looper.getMainLooper())
 
     // 다음 영상으로 넘어간 뒤에는 이전 영상의 위치를 알 수 없으므로 마지막 값을 들고 있는다
@@ -75,9 +80,14 @@ class PlaybackService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        session = MediaSession.Builder(this, player)
-            .setSessionActivity(openApp)
-            .setCallback(object : MediaSession.Callback {
+        // 두 플레이어가 각자 알림을 갖도록 알림 번호를 나눈다
+        setMediaNotificationProvider(
+            DefaultMediaNotificationProvider.Builder(this)
+                .setNotificationIdProvider { s -> if (s.id == BG_SESSION_ID) 1002 else 1001 }
+                .build()
+        )
+
+        val callback = object : MediaSession.Callback {
                 // 컨트롤러는 mediaId만 넘기므로 보관함에서 실제 파일 경로를 찾아 채운다
                 override fun onAddMediaItems(
                     mediaSession: MediaSession,
@@ -96,6 +106,7 @@ class PlaybackService : MediaSessionService() {
                     controller: MediaSession.ControllerInfo,
                 ): ListenableFuture<MediaItemsWithStartPosition> {
                     val restored = WatchHistory.restore(this@PlaybackService)
+                        ?.takeIf { mediaSession.id != BG_SESSION_ID }
                         ?: return Futures.immediateFailedFuture(
                             UnsupportedOperationException("재생 기록 없음")
                         )
@@ -104,8 +115,36 @@ class PlaybackService : MediaSessionService() {
                         MediaItemsWithStartPosition(videos.map { it.toMediaItem() }, index, position)
                     )
                 }
-            })
+            }
+
+        session = MediaSession.Builder(this, player)
+            .setSessionActivity(openApp)
+            .setCallback(callback)
             .build()
+
+        // 배경 소리: 오디오 포커스를 잡지 않아야 영상 소리와 동시에 나온다
+        bgPlayer = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(SavedMediaSourceFactory(this, audioOnly = true))
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .build(),
+                false
+            )
+            .setWakeMode(C.WAKE_MODE_LOCAL)
+            .build()
+        bgPlayer.trackSelectionParameters = bgPlayer.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .build()
+        bgPlayer.repeatMode = Player.REPEAT_MODE_ONE
+        bgSession = MediaSession.Builder(this, bgPlayer)
+            .setId(BG_SESSION_ID)
+            .setSessionActivity(openApp)
+            .setCallback(callback)
+            .build()
+            .also { addSession(it) }
     }
 
     private val historyListener = object : Player.Listener {
@@ -182,14 +221,24 @@ class PlaybackService : MediaSessionService() {
         )
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+    /** 앱이 연결할 때 connectionHints로 어느 플레이어(영상/배경 소리)인지 고른다 */
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
+        if (controllerInfo.connectionHints.getString(HINT_SESSION) == BG_SESSION_ID) bgSession
+        else session
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         persist()
         // 최근 앱 목록에서 지워도 재생 중이면 계속, 멈춰 있으면 종료
-        if (!player.playWhenReady || player.mediaItemCount == 0) {
+        val mainActive = player.playWhenReady && player.mediaItemCount > 0
+        val bgActive = bgPlayer.playWhenReady && bgPlayer.mediaItemCount > 0
+        if (!mainActive && !bgActive) {
             stopSelf()
         }
+    }
+
+    companion object {
+        const val BG_SESSION_ID = "background_audio"
+        const val HINT_SESSION = "session"
     }
 
     override fun onDestroy() {
@@ -200,6 +249,11 @@ class PlaybackService : MediaSessionService() {
             release()
         }
         session = null
+        bgSession?.run {
+            player.release()
+            release()
+        }
+        bgSession = null
         super.onDestroy()
     }
 }
@@ -209,7 +263,11 @@ class PlaybackService : MediaSessionService() {
  * 저장해 둔 자막 파일(한국어/원어)도 붙인다.
  */
 @OptIn(UnstableApi::class)
-class SavedMediaSourceFactory(private val context: Context) : MediaSource.Factory {
+class SavedMediaSourceFactory(
+    private val context: Context,
+    /** 배경 소리용: 소리 파일만 쓰고 자막·영상은 붙이지 않는다 */
+    private val audioOnly: Boolean = false,
+) : MediaSource.Factory {
 
     private val defaultFactory = DefaultMediaSourceFactory(context)
 
@@ -228,6 +286,14 @@ class SavedMediaSourceFactory(private val context: Context) : MediaSource.Factor
     override fun createMediaSource(mediaItem: MediaItem): MediaSource {
         val saved = Library.find(context, mediaItem.mediaId)
             ?: return defaultFactory.createMediaSource(mediaItem)
+
+        if (audioOnly) {
+            // 소리를 따로 저장했으면 그 파일만, 아니면 영상 파일(영상 트랙은 플레이어에서 끔)
+            val file = saved.audioFile ?: saved.videoFile!!
+            return defaultFactory.createMediaSource(
+                mediaItem.buildUpon().setUri(Uri.fromFile(file)).build()
+            )
+        }
 
         val subtitles = buildList {
             saved.subKo?.let {

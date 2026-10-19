@@ -48,6 +48,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var b: ActivityMainBinding
     private lateinit var adapter: VideoAdapter
     private var controllerFuture: ListenableFuture<MediaController>? = null
+    private var bgControllerFuture: ListenableFuture<MediaController>? = null
+    private var bgController: MediaController? = null
+
+    private val bgListener = object : Player.Listener {
+        override fun onEvents(player: Player, events: Player.Events) = syncBgUi()
+    }
     private var controller: MediaController? = null
     private var fullscreen = false
     private var videos: List<SavedVideo> = emptyList()
@@ -154,6 +160,28 @@ class MainActivity : AppCompatActivity() {
         )
         b.playerView.setFullscreenButtonClickListener { setFullscreen(it) }
 
+        b.bgPlayPause.setOnClickListener {
+            bgController?.let { if (it.isPlaying) it.pause() else it.play() }
+        }
+        b.bgRepeat.setOnClickListener {
+            bgController?.let {
+                it.repeatMode = if (it.repeatMode == Player.REPEAT_MODE_ONE) Player.REPEAT_MODE_OFF
+                else Player.REPEAT_MODE_ONE
+            }
+        }
+        b.bgClose.setOnClickListener {
+            bgController?.run { stop(); clearMediaItems() }
+        }
+        b.bgVolume.addOnChangeListener { _, value, fromUser ->
+            if (fromUser) {
+                bgController?.volume = value
+                prefs.edit().putFloat("bg_volume", value).apply()
+            }
+        }
+        b.mainVolume.addOnChangeListener { _, value, fromUser ->
+            if (fromUser) controller?.volume = value
+        }
+
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (fullscreen) {
@@ -215,6 +243,20 @@ class MainActivity : AppCompatActivity() {
             restoreLastSession(c)
             syncPlayerUi()
         }, MoreExecutors.directExecutor())
+
+        // 배경 소리 플레이어는 같은 서비스의 두 번째 세션에 연결
+        val bgFuture = MediaController.Builder(this, token)
+            .setConnectionHints(Bundle().apply {
+                putString(PlaybackService.HINT_SESSION, PlaybackService.BG_SESSION_ID)
+            })
+            .buildAsync()
+        bgControllerFuture = bgFuture
+        bgFuture.addListener({
+            val c = runCatching { bgFuture.get() }.getOrNull() ?: return@addListener
+            bgController = c
+            c.addListener(bgListener)
+            syncBgUi()
+        }, MoreExecutors.directExecutor())
     }
 
     override fun onStop() {
@@ -227,6 +269,10 @@ class MainActivity : AppCompatActivity() {
         controller = null
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null
+        bgController?.removeListener(bgListener)
+        bgController = null
+        bgControllerFuture?.let { MediaController.releaseFuture(it) }
+        bgControllerFuture = null
         super.onStop()
     }
 
@@ -351,6 +397,7 @@ class MainActivity : AppCompatActivity() {
     private fun showItemMenu(video: SavedVideo) {
         val hasSubs = video.subKo != null
         val options = arrayOf(
+            "🎧 배경 소리로 같이 듣기 (화면 없이 소리만)",
             if (hasSubs) "한국어 자막 다시 받기" else "한국어 자막 받기 (자동 번역)",
             "시청 기록 지우기",
             "삭제",
@@ -359,18 +406,49 @@ class MainActivity : AppCompatActivity() {
             .setTitle(video.title)
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> {
+                    0 -> playInBackground(video)
+                    1 -> {
                         DownloadService.addSubtitles(this, video.id)
                         toast("자막을 받는 중이에요 (인터넷 필요)")
                     }
-                    1 -> {
+                    2 -> {
                         WatchHistory.remove(this, video.id)
                         refreshList()
                     }
-                    2 -> confirmDelete(video)
+                    3 -> confirmDelete(video)
                 }
             }
             .show()
+    }
+
+    /** 지금 보는 영상은 그대로 두고, 이 항목의 소리를 동시에 재생 */
+    private fun playInBackground(video: SavedVideo) {
+        val c = bgController ?: return toast("플레이어 준비 중이에요. 잠시 후 다시 눌러 주세요")
+        c.setMediaItem(video.toMediaItem())
+        c.volume = prefs.getFloat("bg_volume", 0.5f)
+        c.prepare()
+        c.play()
+        syncBgUi()
+        toast("배경 소리로 재생해요. 아래 막대에서 소리 크기를 조절하세요")
+    }
+
+    private fun syncBgUi() {
+        val c = bgController
+        val active = c != null && c.mediaItemCount > 0
+        b.bgCard.isVisible = active
+        if (!active) return
+        c!!
+        b.bgTitle.text = c.mediaMetadata.title ?: c.currentMediaItem?.mediaId?.let {
+            Library.find(this, it)?.title
+        } ?: "배경 소리"
+        b.bgPlayPause.setImageResource(
+            if (c.playWhenReady) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+        )
+        b.bgRepeat.alpha = if (c.repeatMode == Player.REPEAT_MODE_ONE) 1f else 0.35f
+        b.bgVolume.value = c.volume.coerceIn(0f, 1f)
+        val main = controller
+        b.mainVolumeRow.isVisible = main != null && main.mediaItemCount > 0
+        main?.let { b.mainVolume.value = it.volume.coerceIn(0f, 1f) }
     }
 
     private fun confirmDelete(video: SavedVideo) {
@@ -383,6 +461,9 @@ class MainActivity : AppCompatActivity() {
                     for (i in c.mediaItemCount - 1 downTo 0) {
                         if (c.getMediaItemAt(i).mediaId == video.id) c.removeMediaItem(i)
                     }
+                }
+                bgController?.let { c ->
+                    if (c.currentMediaItem?.mediaId == video.id) { c.stop(); c.clearMediaItems() }
                 }
                 Library.delete(video)
                 WatchHistory.remove(this, video.id)
@@ -400,6 +481,7 @@ class MainActivity : AppCompatActivity() {
         b.nowPlayingBar.isVisible = active && !fullscreen
         val id = c?.currentMediaItem?.mediaId
         adapter.playingId = if (active) id else null
+        syncBgUi()
         val current = id?.let { Library.find(this, it) }
         b.nowPlaying.text = current?.title ?: ""
         // 소리만 저장한 항목은 썸네일을 크게 보여 준다
