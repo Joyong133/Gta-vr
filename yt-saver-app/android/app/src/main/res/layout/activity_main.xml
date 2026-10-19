@@ -309,7 +309,7 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/findButton"
-                    style="?attr/materialButtonTonalStyle"
+                    style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="🔍 키워드로 영상 찾기" />
