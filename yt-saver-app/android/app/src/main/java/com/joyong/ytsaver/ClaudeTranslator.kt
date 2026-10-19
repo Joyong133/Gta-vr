@@ -30,7 +30,7 @@ object AiSettings {
         runCatching { Model.valueOf(prefs(context).getString("model", Model.OPUS.name)!!) }
             .getOrDefault(Model.OPUS)
 
-    fun enabled(context: Context): Boolean = prefs(context).getBoolean("enabled", true)
+    fun enabled(context: Context): Boolean = prefs(context).getBoolean("enabled", false)
 
     /** 키가 있고 켜져 있으면 자막 번역에 Claude를 쓴다 */
     fun isReady(context: Context) = enabled(context) && apiKey(context).isNotBlank()

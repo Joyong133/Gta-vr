@@ -274,7 +274,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:checked="true"
-                    android:text="한국어 자막 같이 저장 (없으면 번역, AI 설정 시 Claude)" />
+                    android:text="한국어 자막 같이 저장 (없으면 구글 번역)" />
 
                 <LinearLayout
                     android:layout_width="match_parent"

@@ -150,20 +150,24 @@ object YouTubeSaver {
         Library.find(context, video.id) ?: video
     }
 
-    /** 저장된 원어 자막을 Claude로 다시 번역 (유튜브 접속 없음) */
+    /** 저장된 원어 자막을 다시 번역 (유튜브 접속 없음). useClaude=false면 구글 번역 */
     suspend fun retranslate(
         context: Context,
         video: SavedVideo,
+        useClaude: Boolean,
         onProgress: (Progress) -> Unit,
     ): SavedVideo = withContext(Dispatchers.IO) {
-        if (!AiSettings.isReady(context)) throw SaveException("AI 번역 설정(API 키)이 필요해요")
+        if (useClaude && !AiSettings.isReady(context)) throw SaveException("AI 번역 설정(API 키)이 필요해요")
         val ko = try {
-            SubtitleSaver.retranslateWithAi(video) { onProgress(Progress(video.title, 0, 0, it)) }
+            val status = { s: String -> onProgress(Progress(video.title, 0, 0, s)) }
+            if (useClaude) SubtitleSaver.retranslateWithAi(video, status)
+            else SubtitleSaver.retranslateWithGoogle(video, status)
         } catch (e: SaveException) {
             throw e
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            throw SaveException("AI 번역 실패: ${e.message ?: e.javaClass.simpleName}", e)
+            val engine = if (useClaude) "Claude" else "구글 번역"
+            throw SaveException("$engine 실패: ${e.message ?: e.javaClass.simpleName}", e)
         }
         Library.writeMeta(video.copy(subKo = ko))
         Library.find(context, video.id) ?: video

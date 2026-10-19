@@ -411,10 +411,11 @@ class MainActivity : AppCompatActivity() {
         val hasSubs = video.subKo != null
         val options = arrayOf(
             "🎧 배경 소리로 같이 듣기 (화면 없이 소리만)",
-            if (hasSubs) "한국어 자막 다시 받기" else "한국어 자막 받기 (자동 번역)",
-            "🤖 AI(Claude)로 한국어 자막 다시 번역",
+            if (hasSubs) "한국어 자막 다시 받기" else "한국어 자막 받기 (구글 번역)",
+            "🌐 구글 번역으로 한국어 자막 다시 만들기",
             "시청 기록 지우기",
             "삭제",
+            "🤖 Claude(유료)로 다시 번역",
         )
         MaterialAlertDialogBuilder(this)
             .setTitle(video.title)
@@ -425,12 +426,13 @@ class MainActivity : AppCompatActivity() {
                         DownloadService.addSubtitles(this, video.id)
                         toast("자막을 받는 중이에요 (인터넷 필요)")
                     }
-                    2 -> retranslateWithAi(video)
+                    2 -> retranslate(video, useClaude = false)
                     3 -> {
                         WatchHistory.remove(this, video.id)
                         refreshList()
                     }
                     4 -> confirmDelete(video)
+                    5 -> retranslate(video, useClaude = true)
                 }
             }
             .show()
@@ -558,20 +560,20 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun retranslateWithAi(video: SavedVideo) {
-        if (!AiSettings.isReady(this)) {
-            toast("먼저 Claude API 키를 넣어 주세요")
+    private fun retranslate(video: SavedVideo, useClaude: Boolean) {
+        if (useClaude && !AiSettings.isReady(this)) {
+            toast("Claude는 API 키를 넣고 켜야 써요 (사용한 만큼 유료)")
             showAiSettings()
             return
         }
         if (video.subOrig != null) {
             // 저장된 원어 자막을 다시 번역 (유튜브 접속 없이)
-            DownloadService.retranslate(this, video.id)
-            toast("Claude로 번역하는 중이에요")
+            DownloadService.retranslate(this, video.id, useClaude)
+            toast(if (useClaude) "Claude로 번역하는 중이에요" else "구글 번역으로 번역하는 중이에요")
         } else {
-            // 원어 자막이 없으면 유튜브에서 받아 오면서 Claude로 번역
+            // 원어 자막이 없으면 유튜브에서 받아 오면서 번역
             DownloadService.addSubtitles(this, video.id)
-            toast("자막을 받아 Claude로 번역하는 중이에요 (인터넷 필요)")
+            toast("자막을 받아 번역하는 중이에요 (인터넷 필요)")
         }
     }
 
@@ -596,12 +598,13 @@ class MainActivity : AppCompatActivity() {
             })
         }
         val enabled = MaterialSwitch(this).apply {
-            text = "자막 번역에 AI 사용"
+            text = "새로 저장할 때 Claude로 번역 (끄면 무료 구글 번역)"
             isChecked = AiSettings.enabled(this@MainActivity)
         }
         val help = TextView(this).apply {
-            text = "한국어 자막이 없는 영상을 저장할 때 Claude가 앞뒤 문맥을 보고 자연스럽게 번역해요. " +
-                "실패하면 기존 방식(유튜브 자동 번역 → 기기 번역)으로 넘어가요.\n\n" +
+            text = "기본 번역은 무료 구글 번역이에요. 이 설정은 돈을 내고 더 자연스러운 번역을 원할 때만 켜세요. " +
+                "켜 두면 한국어 자막이 없는 영상을 저장할 때 Claude가 앞뒤 문맥을 보고 번역하고, " +
+                "실패하면 구글 번역으로 넘어가요.\n\n" +
                 "• API 키는 console.anthropic.com 에서 만들 수 있고, 사용한 만큼 요금이 나가요 " +
                 "(10분 영상 기준 Opus 몇십 원~백몇십 원, Haiku는 몇 원 수준)\n" +
                 "• 키는 이 폰의 앱 저장소에만 보관돼요"
@@ -649,7 +652,7 @@ class MainActivity : AppCompatActivity() {
         b.toolbar.menu.clear()
         b.toolbar.menu.add(0, MENU_LOGIN, 0, if (loggedIn) "로그아웃" else "유튜브 로그인")
             .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
-        b.toolbar.menu.add(0, MENU_AI, 1, "AI 자막 번역 설정")
+        b.toolbar.menu.add(0, MENU_AI, 1, "Claude 번역 설정 (유료, 선택)")
             .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
     }
 

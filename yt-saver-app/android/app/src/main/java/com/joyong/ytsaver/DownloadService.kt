@@ -45,8 +45,10 @@ class DownloadService : Service() {
         val quality: Quality = Quality.P720,
         val withSubtitles: Boolean = true,
         val subtitleFor: String? = null,
-        /** 저장된 원어 자막을 AI로 다시 번역할 영상 */
+        /** 저장된 원어 자막을 다시 번역할 영상 */
         val retranslateFor: String? = null,
+        /** 다시 번역할 때 Claude를 쓸지 (아니면 구글 번역) */
+        val useClaude: Boolean = false,
     )
 
     private val queue = Channel<Task>(Channel.UNLIMITED)
@@ -71,12 +73,13 @@ class DownloadService : Service() {
             val url = intent?.getStringExtra(EXTRA_URL)
             val subtitleFor = intent?.getStringExtra(EXTRA_SUBTITLE_FOR)
             val retranslateFor = intent?.getStringExtra(EXTRA_RETRANSLATE_FOR)
+            val useClaude = intent?.getBooleanExtra(EXTRA_USE_CLAUDE, false) ?: false
             val quality = intent?.getStringExtra(EXTRA_QUALITY)
                 ?.let { runCatching { Quality.valueOf(it) }.getOrNull() } ?: Quality.P720
             val withSubtitles = intent?.getBooleanExtra(EXTRA_SUBTITLES, true) ?: true
             if (url != null || subtitleFor != null || retranslateFor != null) {
                 pending++
-                queue.trySend(Task(url, quality, withSubtitles, subtitleFor, retranslateFor))
+                queue.trySend(Task(url, quality, withSubtitles, subtitleFor, retranslateFor, useClaude))
             }
         }
 
@@ -109,9 +112,9 @@ class DownloadService : Service() {
             if (task.retranslateFor != null) {
                 val video = Library.find(this, task.retranslateFor)
                     ?: throw SaveException("영상을 찾을 수 없어요")
-                val updated = YouTubeSaver.retranslate(this, video, onProgress)
-                _events.tryEmit(Event.Saved(updated.title, "AI 자막 번역 완료"))
-                notifyDone("AI 자막 번역 완료", updated.title)
+                val updated = YouTubeSaver.retranslate(this, video, task.useClaude, onProgress)
+                _events.tryEmit(Event.Saved(updated.title, "한국어 자막 번역 완료"))
+                notifyDone("한국어 자막 번역 완료", updated.title)
             } else if (task.subtitleFor != null) {
                 val video = Library.find(this, task.subtitleFor)
                     ?: throw SaveException("영상을 찾을 수 없어요")
@@ -124,7 +127,7 @@ class DownloadService : Service() {
                     !task.withSubtitles -> "저장 완료"
                     saved.subKo != null -> "저장 완료 (한국어 자막 포함)"
                     else -> "저장 완료 (자막 없음)"
-                } + (SubtitleSaver.lastAiError?.let { " · AI 번역 실패: $it" } ?: "")
+                } + (SubtitleSaver.lastAiError?.let { " · 번역 실패: $it" } ?: "")
                 SubtitleSaver.lastAiError = null
                 _events.tryEmit(Event.Saved(saved.title, note))
                 notifyDone(note, saved.title)
@@ -137,7 +140,7 @@ class DownloadService : Service() {
             // 앱이 내려가 있을 때 실패해도 다시 열면 볼 수 있도록 상태로 남긴다
             _failure.value = Failure(
                 title = when {
-                    task.retranslateFor != null -> "AI 자막 번역 실패"
+                    task.retranslateFor != null -> "자막 번역 실패"
                     task.subtitleFor != null -> "자막 저장 실패"
                     else -> "저장 실패"
                 },
@@ -239,6 +242,7 @@ class DownloadService : Service() {
         private const val EXTRA_SUBTITLES = "subtitles"
         private const val EXTRA_SUBTITLE_FOR = "subtitle_for"
         private const val EXTRA_RETRANSLATE_FOR = "retranslate_for"
+        private const val EXTRA_USE_CLAUDE = "use_claude"
 
         private val _state = MutableStateFlow<DownloadState>(DownloadState.Idle)
         val state: StateFlow<DownloadState> = _state
@@ -265,6 +269,7 @@ class DownloadService : Service() {
                 .putExtra(EXTRA_SUBTITLES, task.withSubtitles)
                 .putExtra(EXTRA_SUBTITLE_FOR, task.subtitleFor)
                 .putExtra(EXTRA_RETRANSLATE_FOR, task.retranslateFor)
+                .putExtra(EXTRA_USE_CLAUDE, task.useClaude)
             ContextCompat.startForegroundService(context, intent)
             return true
         }
@@ -277,9 +282,10 @@ class DownloadService : Service() {
             ContextCompat.startForegroundService(context, intent)
         }
 
-        fun retranslate(context: Context, videoId: String) {
+        fun retranslate(context: Context, videoId: String, useClaude: Boolean) {
             val intent = Intent(context, DownloadService::class.java)
                 .putExtra(EXTRA_RETRANSLATE_FOR, videoId)
+                .putExtra(EXTRA_USE_CLAUDE, useClaude)
             ContextCompat.startForegroundService(context, intent)
         }
 
