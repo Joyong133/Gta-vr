@@ -103,7 +103,7 @@ object YouTubeSaver {
             // 자막은 실패해도 영상 저장은 그대로 완료
             val subs = if (withSubtitles) {
                 runCatching {
-                    SubtitleSaver.save(dir, info.captions) { onProgress(Progress(title, 0, 0, it)) }
+                    SubtitleSaver.save(dir, info.captions, title) { onProgress(Progress(title, 0, 0, it)) }
                 }.onFailure { if (it is CancellationException) throw it }.getOrNull()
             } else null
 
@@ -140,13 +140,32 @@ object YouTubeSaver {
         onProgress(Progress(video.title, 0, 0, "자막 정보 가져오는 중…"))
         val info = fetchInfo(video.id)
         if (info.captions.isEmpty()) throw SaveException("이 영상에는 유튜브 자막이 없어요")
-        val subs = SubtitleSaver.save(video.dir, info.captions) {
+        val subs = SubtitleSaver.save(video.dir, info.captions, video.title) {
             onProgress(Progress(video.title, 0, 0, it))
         }
         if (subs.ko == null) throw SaveException("한국어 자막을 만들지 못했어요")
         Library.writeMeta(
             video.copy(subKo = subs.ko, subOrig = subs.orig, subOrigLang = subs.origLang)
         )
+        Library.find(context, video.id) ?: video
+    }
+
+    /** 저장된 원어 자막을 Claude로 다시 번역 (유튜브 접속 없음) */
+    suspend fun retranslate(
+        context: Context,
+        video: SavedVideo,
+        onProgress: (Progress) -> Unit,
+    ): SavedVideo = withContext(Dispatchers.IO) {
+        if (!AiSettings.isReady(context)) throw SaveException("AI 번역 설정(API 키)이 필요해요")
+        val ko = try {
+            SubtitleSaver.retranslateWithAi(video) { onProgress(Progress(video.title, 0, 0, it)) }
+        } catch (e: SaveException) {
+            throw e
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            throw SaveException("AI 번역 실패: ${e.message ?: e.javaClass.simpleName}", e)
+        }
+        Library.writeMeta(video.copy(subKo = ko))
         Library.find(context, video.id) ?: video
     }
 

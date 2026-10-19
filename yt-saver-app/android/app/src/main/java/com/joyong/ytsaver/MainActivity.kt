@@ -10,6 +10,15 @@ import android.content.pm.PackageManager
 import android.graphics.drawable.BitmapDrawable
 import android.os.Build
 import android.os.Bundle
+import android.text.InputType
+import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
+import android.widget.ScrollView
+import android.widget.TextView
+import com.google.android.material.materialswitch.MaterialSwitch
+import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
@@ -99,7 +108,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         updateAccountUi()
-        b.toolbar.setOnMenuItemClickListener {
+        b.toolbar.setOnMenuItemClickListener { item ->
+            if (item.itemId == MENU_AI) {
+                showAiSettings()
+                return@setOnMenuItemClickListener true
+            }
             if (YouTubeAccount.isLoggedIn(this)) {
                 MaterialAlertDialogBuilder(this)
                     .setTitle("유튜브 로그아웃할까요?")
@@ -399,6 +412,7 @@ class MainActivity : AppCompatActivity() {
         val options = arrayOf(
             "🎧 배경 소리로 같이 듣기 (화면 없이 소리만)",
             if (hasSubs) "한국어 자막 다시 받기" else "한국어 자막 받기 (자동 번역)",
+            "🤖 AI(Claude)로 한국어 자막 다시 번역",
             "시청 기록 지우기",
             "삭제",
         )
@@ -411,11 +425,12 @@ class MainActivity : AppCompatActivity() {
                         DownloadService.addSubtitles(this, video.id)
                         toast("자막을 받는 중이에요 (인터넷 필요)")
                     }
-                    2 -> {
+                    2 -> retranslateWithAi(video)
+                    3 -> {
                         WatchHistory.remove(this, video.id)
                         refreshList()
                     }
-                    3 -> confirmDelete(video)
+                    4 -> confirmDelete(video)
                 }
             }
             .show()
@@ -543,6 +558,76 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
+    private fun retranslateWithAi(video: SavedVideo) {
+        if (!AiSettings.isReady(this)) {
+            toast("먼저 Claude API 키를 넣어 주세요")
+            showAiSettings()
+            return
+        }
+        if (video.subOrig != null) {
+            // 저장된 원어 자막을 다시 번역 (유튜브 접속 없이)
+            DownloadService.retranslate(this, video.id)
+            toast("Claude로 번역하는 중이에요")
+        } else {
+            // 원어 자막이 없으면 유튜브에서 받아 오면서 Claude로 번역
+            DownloadService.addSubtitles(this, video.id)
+            toast("자막을 받아 Claude로 번역하는 중이에요 (인터넷 필요)")
+        }
+    }
+
+    /** Claude API 키·모델 설정 */
+    private fun showAiSettings() {
+        val pad = (20 * resources.displayMetrics.density).toInt()
+        val keyLayout = TextInputLayout(this).apply {
+            hint = "Claude API 키 (sk-ant-…)"
+            endIconMode = TextInputLayout.END_ICON_PASSWORD_TOGGLE
+        }
+        val keyInput = TextInputEditText(keyLayout.context).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setText(AiSettings.apiKey(this@MainActivity))
+        }
+        keyLayout.addView(keyInput)
+        val models = RadioGroup(this)
+        AiSettings.Model.entries.forEachIndexed { i, m ->
+            models.addView(RadioButton(this).apply {
+                id = 1000 + i
+                text = m.label
+                isChecked = m == AiSettings.model(this@MainActivity)
+            })
+        }
+        val enabled = MaterialSwitch(this).apply {
+            text = "자막 번역에 AI 사용"
+            isChecked = AiSettings.enabled(this@MainActivity)
+        }
+        val help = TextView(this).apply {
+            text = "한국어 자막이 없는 영상을 저장할 때 Claude가 앞뒤 문맥을 보고 자연스럽게 번역해요. " +
+                "실패하면 기존 방식(유튜브 자동 번역 → 기기 번역)으로 넘어가요.\n\n" +
+                "• API 키는 console.anthropic.com 에서 만들 수 있고, 사용한 만큼 요금이 나가요 " +
+                "(10분 영상 기준 Opus 몇십 원~백몇십 원, Haiku는 몇 원 수준)\n" +
+                "• 키는 이 폰의 앱 저장소에만 보관돼요"
+            setPadding(0, pad / 2, 0, 0)
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+            addView(keyLayout)
+            addView(models)
+            addView(enabled)
+            addView(help)
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("AI 자막 번역 (Claude)")
+            .setView(ScrollView(this).apply { addView(content) })
+            .setNegativeButton("취소", null)
+            .setPositiveButton("저장") { _, _ ->
+                val model = AiSettings.Model.entries
+                    .getOrElse(models.checkedRadioButtonId - 1000) { AiSettings.Model.OPUS }
+                AiSettings.save(this, keyInput.text?.toString().orEmpty(), model, enabled.isChecked)
+                toast(if (AiSettings.isReady(this)) "AI 번역을 켰어요 (${model.label.substringBefore(" (")})" else "AI 번역이 꺼져 있어요")
+            }
+            .show()
+    }
+
     private fun askLogin() {
         MaterialAlertDialogBuilder(this)
             .setTitle("유튜브 로그인")
@@ -562,8 +647,15 @@ class MainActivity : AppCompatActivity() {
         val loggedIn = YouTubeAccount.isLoggedIn(this)
         b.toolbar.subtitle = "v${App.versionName}" + if (loggedIn) " · 유튜브 로그인됨" else ""
         b.toolbar.menu.clear()
-        b.toolbar.menu.add(if (loggedIn) "로그아웃" else "유튜브 로그인")
+        b.toolbar.menu.add(0, MENU_LOGIN, 0, if (loggedIn) "로그아웃" else "유튜브 로그인")
             .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
+        b.toolbar.menu.add(0, MENU_AI, 1, "AI 자막 번역 설정")
+            .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
+    }
+
+    companion object {
+        private const val MENU_LOGIN = 1
+        private const val MENU_AI = 2
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()

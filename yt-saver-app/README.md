@@ -15,6 +15,12 @@
 - **시청 기록**: 영상마다 본 위치를 기억해 다시 누르면 이어서 재생. 목록에 진행 막대와
   "이어보기 / 다 봄"을 표시하고, "최근 본" 정렬을 지원. 앱이 완전히 꺼져도 다시 열면
   마지막으로 보던 영상이 그 위치에 일시정지 상태로 준비됨.
+- **AI 자막 번역 (Claude)**: 메뉴 → "AI 자막 번역 설정"에서 Claude API 키와 모델(Opus 5.5 / Sonnet 5.5 /
+  Haiku 5.5)을 넣으면, 한국어 자막이 없는 영상은 Claude가 120줄씩 앞뒤 문맥을 보고 번역한다
+  (공식 `anthropic-java` SDK, structured output으로 `{i, t}` 목록을 받아 줄 번호대로 맞춤, Opus·Sonnet은
+  서버 측 거절 폴백 `fallbacks: "default"`). 실패하면 유튜브 자동 번역 → ML Kit 순서로 넘어간다.
+  이미 저장한 영상은 길게 눌러 "AI(Claude)로 한국어 자막 다시 번역" → 저장된 `sub_orig.vtt`를 다시 번역하므로
+  유튜브 접속이 필요 없다. 키는 앱 전용 SharedPreferences에만 보관.
 - **배경 소리**: 목록에서 길게 눌러 "배경 소리로 같이 듣기" → 지금 보는 영상은 그대로 두고 그 항목의 소리만
   동시에 재생(예: 강의 영상 + 음악). 화면 위 막대에서 재생/일시정지, 한 곡 반복, 배경·영상 소리 크기 따로 조절.
   서비스 안의 두 번째 ExoPlayer/MediaSession(오디오 포커스 안 잡음, 영상·자막 트랙 끔)이라 앱을 내려도 계속 나온다.
@@ -31,6 +37,7 @@
 | `DownloadService.kt` | 앱을 내려도 저장이 계속되도록 포그라운드 서비스에서 대기열 처리 |
 | `Library.kt` | `Android/data/com.joyong.ytsaver/files/videos/<영상ID>/` 에 파일과 `meta.json` 보관 |
 | `SubtitleSaver.kt` | 유튜브 자막(json3)을 받아 한국어로 번역해 WebVTT로 저장 |
+| `ClaudeTranslator.kt` | Claude API로 자막 큐를 묶어서 한국어로 번역, AI 설정 보관 |
 | `WatchHistory.kt` | 영상별 시청 위치와 마지막 재생목록 저장 |
 | `PlaybackService.kt` | Media3 `MediaSessionService` + ExoPlayer. 영상/소리/자막 파일을 합쳐 재생, 백그라운드 재생, 시청 위치 저장 |
 | `MainActivity.kt` | 입력·진행률·보관함 목록·플레이어 화면 |

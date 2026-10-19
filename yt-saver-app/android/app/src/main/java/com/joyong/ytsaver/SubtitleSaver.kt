@@ -29,6 +29,7 @@ object SubtitleSaver {
     suspend fun save(
         dir: File,
         tracks: List<Caption>,
+        title: String,
         onStatus: (String) -> Unit,
     ): Result {
         val korean = tracks.filter { it.isKorean() }
@@ -52,8 +53,13 @@ object SubtitleSaver {
                 runCatching { fetch(korean.url, null) }.getOrNull()
             }
             source != null -> {
-                onStatus("한국어로 자동 번역 중…")
-                runCatching { fetch(source.url, "ko") }.getOrNull()
+                // 1) Claude 설정이 있으면 가장 자연스러운 AI 번역 2) 유튜브 자동 번역 3) 기기 번역
+                sourceCues?.let { translateWithAi(it, source.languageTag, title, onStatus) }
+                    ?: run {
+                        onStatus("한국어로 자동 번역 중…")
+                        null
+                    }
+                    ?: runCatching { fetch(source.url, "ko") }.getOrNull()
                     ?.takeIf { cues -> cues.any { HANGUL.containsMatchIn(it.text) } }
                     ?: sourceCues?.let { translateOnDevice(it, source.languageTag, onStatus) }
             }
@@ -62,6 +68,64 @@ object SubtitleSaver {
 
         val koFile = koCues?.let { File(dir, "sub_ko.vtt").also { f -> writeVtt(f, it) } }
         return Result(koFile, origFile, if (origFile != null) source!!.languageTag else "")
+    }
+
+    /** Claude로 번역. 설정이 없거나 실패하면 null (다음 방법으로 넘어감) */
+    private suspend fun translateWithAi(
+        cues: List<Cue>,
+        languageTag: String,
+        title: String,
+        onStatus: (String) -> Unit,
+    ): List<Cue>? {
+        val context = App.instance
+        if (!AiSettings.isReady(context)) return null
+        return try {
+            ClaudeTranslator.translate(context, cues, languageTag, title, onStatus)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            lastAiError = e.message ?: e.javaClass.simpleName
+            null
+        }
+    }
+
+    /** 마지막 AI 번역 실패 사유 (자막만 다시 번역할 때 안내용) */
+    @Volatile
+    var lastAiError: String? = null
+
+    /**
+     * 이미 저장된 원어 자막(sub_orig.vtt)을 Claude로 다시 번역한다.
+     * 유튜브에 다시 접속하지 않으므로 유튜브가 막혀 있어도 된다.
+     */
+    suspend fun retranslateWithAi(video: SavedVideo, onStatus: (String) -> Unit): File {
+        val orig = video.subOrig ?: throw SaveException("저장된 원어 자막이 없어요")
+        val cues = readVtt(orig)
+        if (cues.isEmpty()) throw SaveException("원어 자막이 비어 있어요")
+        val translated = ClaudeTranslator.translate(
+            App.instance, cues, video.subOrigLang, video.title, onStatus
+        )
+        return File(video.dir, "sub_ko.vtt").also { writeVtt(it, translated) }
+    }
+
+    /** writeVtt로 쓴 파일을 다시 읽는다 */
+    private fun readVtt(file: File): List<Cue> {
+        val blocks = file.readText().replace("\r\n", "\n").split(Regex("\n{2,}"))
+        return blocks.mapNotNull { block ->
+            val lines = block.trim().lines()
+            val timing = lines.indexOfFirst { "-->" in it }
+            if (timing < 0) return@mapNotNull null
+            val (start, end) = lines[timing].split("-->").map { parseTime(it.trim()) }
+            val text = lines.drop(timing + 1).joinToString("\n")
+                .replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+            if (text.isBlank()) null else Cue(start, end, text)
+        }
+    }
+
+    private fun parseTime(s: String): Long {
+        val parts = s.substringBefore(' ').split(':')
+        val sec = parts.last().split('.')
+        val h = if (parts.size == 3) parts[0].toLong() else 0
+        val m = parts[parts.size - 2].toLong()
+        return ((h * 60 + m) * 60 + sec[0].toLong()) * 1000 + (sec.getOrNull(1)?.padEnd(3, '0')?.take(3)?.toLong() ?: 0)
     }
 
     private fun Caption.isKorean() = languageTag.lowercase().startsWith("ko")
