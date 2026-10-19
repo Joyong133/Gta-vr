@@ -110,6 +110,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         b = ActivityMainBinding.inflate(layoutInflater)
         setContentView(b.root)
+        // 화면이 꺼지기 전에 미리 적용해 둬야 다시 켤 때 잠금 화면 위에 바로 뜬다
+        applyShowWhenLocked()
 
         ViewCompat.setOnApplyWindowInsetsListener(b.root) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -126,7 +128,7 @@ class MainActivity : AppCompatActivity() {
                 applyShowWhenLocked()
                 updateAccountUi()
                 toast(
-                    if (on) "켰어요: 재생 중에 화면을 끄면, 다시 켤 때 잠금 해제 없이 이 화면이 먼저 나와요"
+                    if (on) "켰어요: 이 앱을 보다가 화면을 끄면, 다시 켤 때 잠금 해제 없이 이 화면이 먼저 나와요"
                     else "잠금화면에서 바로 보기를 껐어요"
                 )
                 return@setOnMenuItemClickListener true
@@ -337,10 +339,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun lockScreenEnabled() = prefs.getBoolean("lock_screen", true)
 
-    /** 재생 중이고 설정이 켜져 있으면 잠금 화면 위에 이 화면을 띄운다 */
+    /** 설정이 켜져 있으면 잠금 화면 위에 이 화면을 띄운다 (재생 여부와 상관없이) */
     private fun applyShowWhenLocked() {
-        val playing = (controller?.mediaItemCount ?: 0) > 0
-        val show = lockScreenEnabled() && playing
+        val show = lockScreenEnabled()
         if (Build.VERSION.SDK_INT >= 27) {
             setShowWhenLocked(show)
         } else {
@@ -585,7 +586,6 @@ class MainActivity : AppCompatActivity() {
         if (!active && fullscreen) setFullscreen(false)
         b.playerView.isVisible = active
         b.nowPlayingBar.isVisible = active && !fullscreen
-        applyShowWhenLocked()
         val id = c?.currentMediaItem?.mediaId
         adapter.playingId = if (active) id else null
         syncBgUi()
