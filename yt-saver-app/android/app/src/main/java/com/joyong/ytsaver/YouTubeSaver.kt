@@ -21,6 +21,21 @@ import java.io.IOException
 import java.net.UnknownHostException
 import kotlin.coroutines.coroutineContext
 
+/** 저장할 소리 언어. code가 빈 값이면 영상의 원래 언어 */
+enum class AudioLanguage(val code: String, val label: String) {
+    ORIGINAL("", "원래 언어"),
+    KO("ko", "한국어"),
+    EN("en", "영어"),
+    JA("ja", "일본어"),
+    ZH("zh", "중국어"),
+    ES("es", "스페인어"),
+    FR("fr", "프랑스어"),
+    DE("de", "독일어"),
+    PT("pt", "포르투갈어"),
+    ID("id", "인도네시아어"),
+    HI("hi", "힌디어"),
+}
+
 enum class Quality(val label: String, val maxHeight: Int) {
     P1080("1080p", 1080),
     P720("720p", 720),
@@ -59,6 +74,7 @@ object YouTubeSaver {
         url: String,
         quality: Quality,
         withSubtitles: Boolean,
+        audioLanguage: AudioLanguage,
         onProgress: (Progress) -> Unit,
     ): SavedVideo = withContext(Dispatchers.IO) {
         val id = videoId(url)
@@ -68,10 +84,21 @@ object YouTubeSaver {
         val title = info.title
         onProgress(Progress(title, 0, 0))
 
-        val audio = pickAudio(info.streams)
-        val video = if (quality == Quality.AUDIO) null else pickVideo(info.streams, quality.maxHeight)
+        val wanted = pickAudio(info.streams, audioLanguage.code)
+        val audio = wanted ?: pickAudio(info.streams, "")
+        // 고른 언어 소리를 쓰려면 소리가 섞인 영상 대신 화면만 있는 영상 + 그 소리를 받아야 한다
+        val dubbed = wanted != null && audioLanguage != AudioLanguage.ORIGINAL && !wanted.originalAudio
+        val video = if (quality == Quality.AUDIO) null
+        else pickVideo(info.streams, quality.maxHeight, requireVideoOnly = dubbed)
+            ?: pickVideo(info.streams, quality.maxHeight)
         // 소리가 포함된 일반 영상 스트림을 골랐다면 별도 오디오 파일은 필요 없다
         val needAudio = video == null || video.kind == MediaStream.Kind.VIDEO_ONLY
+        audioNote = when {
+            audioLanguage == AudioLanguage.ORIGINAL -> null
+            wanted == null -> "${audioLanguage.label} 소리가 없어 원래 언어로 저장"
+            dubbed && !needAudio -> "이 화질에선 ${audioLanguage.label} 소리를 붙일 수 없어 원래 언어로 저장"
+            else -> null
+        }
         if (video == null && audio == null) throw SaveException("저장할 수 있는 스트림을 찾지 못했어요")
         if (needAudio && audio == null) throw SaveException("소리 스트림을 찾지 못했어요")
 
@@ -113,7 +140,8 @@ object YouTubeSaver {
                     title = title,
                     uploader = info.uploader,
                     durationSec = info.durationSec,
-                    quality = if (video == null) "소리만" else "${video.height}p",
+                    quality = (if (video == null) "소리만" else "${video.height}p") +
+                        (if (dubbed && needAudio) " · ${audioLanguage.label}" else ""),
                     savedAt = System.currentTimeMillis(),
                     dir = dir,
                     videoFile = videoFile,
@@ -179,18 +207,35 @@ object YouTubeSaver {
         throw SaveException(describe(e), e)
     }
 
-    private fun pickAudio(streams: List<MediaStream>): MediaStream? {
+    /** 마지막 저장에서 고른 소리 언어를 못 찾았을 때 안내 */
+    @Volatile
+    var audioNote: String? = null
+
+    /**
+     * lang이 비어 있으면 원래 언어 트랙, 아니면 그 언어 트랙(원래 언어가 그 언어인 경우 포함).
+     * 해당 언어가 없으면 null.
+     */
+    private fun pickAudio(streams: List<MediaStream>, lang: String): MediaStream? {
         val audio = streams.filter { it.kind == MediaStream.Kind.AUDIO }
-        // 더빙 트랙이 여러 개인 영상은 원본 언어 트랙을 우선
-        val original = audio.filter { it.originalAudio }.ifEmpty { audio }
-        return original.filter { it.ext == "m4a" }.maxByOrNull { it.bitrate }
-            ?: original.maxByOrNull { it.bitrate }
+        val candidates = if (lang.isEmpty()) {
+            // 더빙 트랙이 여러 개인 영상은 원본 언어 트랙을 우선
+            audio.filter { it.originalAudio }.ifEmpty { audio }
+        } else {
+            audio.filter { it.audioLang == lang }
+                .ifEmpty { return null }
+        }
+        return candidates.filter { it.ext == "m4a" }.maxByOrNull { it.bitrate }
+            ?: candidates.maxByOrNull { it.bitrate }
     }
 
-    private fun pickVideo(streams: List<MediaStream>, maxHeight: Int): MediaStream? {
+    private fun pickVideo(
+        streams: List<MediaStream>,
+        maxHeight: Int,
+        requireVideoOnly: Boolean = false,
+    ): MediaStream? {
         val byQuality = compareBy<MediaStream>({ it.height }, { it.bitrate })
         val videoOnly = streams.filter { it.kind == MediaStream.Kind.VIDEO_ONLY }
-        val muxed = streams.filter { it.kind == MediaStream.Kind.MUXED }
+        val muxed = if (requireVideoOnly) emptyList() else streams.filter { it.kind == MediaStream.Kind.MUXED }
 
         // 1) 거의 모든 폰이 하드웨어로 재생하는 H.264(MP4)
         videoOnly.filter { it.isAvc && it.height in 1..maxHeight }.maxWithOrNull(byQuality)

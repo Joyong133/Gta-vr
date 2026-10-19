@@ -49,8 +49,24 @@ object WatchHistory {
     }
 
     fun remove(context: Context, id: String) {
-        prefs(context).edit().remove("v_$id").apply()
+        prefs(context).edit().remove("v_$id").remove("m_$id").apply()
     }
+
+    /** 집중 모드용: 건너뛰지 않고 실제로 재생해서 도달한 가장 먼 위치 */
+    fun maxWatched(context: Context, id: String): Long {
+        val p = prefs(context)
+        if (p.contains("m_$id")) return p.getLong("m_$id", 0)
+        // 이 기능 이전에 보던 영상은 마지막 시청 위치(다 봤으면 끝)까지 본 것으로
+        return get(context, id)?.positionMs ?: 0
+    }
+
+    fun setMaxWatched(context: Context, id: String, positionMs: Long) {
+        prefs(context).edit().putLong("m_$id", positionMs).apply()
+    }
+
+    /** 집중 모드 켜짐 여부 (앱 설정) */
+    fun focusMode(context: Context): Boolean =
+        context.getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("focus_mode", false)
 
     fun saveSession(context: Context, ids: List<String>, index: Int, positionMs: Long) {
         prefs(context).edit()

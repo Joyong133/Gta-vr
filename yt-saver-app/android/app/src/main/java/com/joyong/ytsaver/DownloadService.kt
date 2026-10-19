@@ -44,6 +44,7 @@ class DownloadService : Service() {
         val url: String? = null,
         val quality: Quality = Quality.P720,
         val withSubtitles: Boolean = true,
+        val audioLanguage: AudioLanguage = AudioLanguage.ORIGINAL,
         val subtitleFor: String? = null,
         /** 저장된 원어 자막을 다시 번역할 영상 */
         val retranslateFor: String? = null,
@@ -77,9 +78,13 @@ class DownloadService : Service() {
             val quality = intent?.getStringExtra(EXTRA_QUALITY)
                 ?.let { runCatching { Quality.valueOf(it) }.getOrNull() } ?: Quality.P720
             val withSubtitles = intent?.getBooleanExtra(EXTRA_SUBTITLES, true) ?: true
+            val audioLanguage = intent?.getStringExtra(EXTRA_AUDIO_LANG)
+                ?.let { runCatching { AudioLanguage.valueOf(it) }.getOrNull() } ?: AudioLanguage.ORIGINAL
             if (url != null || subtitleFor != null || retranslateFor != null) {
                 pending++
-                queue.trySend(Task(url, quality, withSubtitles, subtitleFor, retranslateFor, useClaude))
+                queue.trySend(
+                    Task(url, quality, withSubtitles, audioLanguage, subtitleFor, retranslateFor, useClaude)
+                )
             }
         }
 
@@ -122,13 +127,17 @@ class DownloadService : Service() {
                 _events.tryEmit(Event.Saved(updated.title, "한국어 자막 저장 완료"))
                 notifyDone("자막 저장 완료", updated.title)
             } else {
-                val saved = YouTubeSaver.save(this, task.url!!, task.quality, task.withSubtitles, onProgress)
+                val saved = YouTubeSaver.save(
+                    this, task.url!!, task.quality, task.withSubtitles, task.audioLanguage, onProgress
+                )
                 val note = when {
                     !task.withSubtitles -> "저장 완료"
                     saved.subKo != null -> "저장 완료 (한국어 자막 포함)"
                     else -> "저장 완료 (자막 없음)"
                 } + (SubtitleSaver.lastAiError?.let { " · 번역 실패: $it" } ?: "")
                 SubtitleSaver.lastAiError = null
+                YouTubeSaver.audioNote?.let { _events.tryEmit(Event.Saved(saved.title, it)) }
+                YouTubeSaver.audioNote = null
                 _events.tryEmit(Event.Saved(saved.title, note))
                 notifyDone(note, saved.title)
             }
@@ -243,6 +252,7 @@ class DownloadService : Service() {
         private const val EXTRA_SUBTITLE_FOR = "subtitle_for"
         private const val EXTRA_RETRANSLATE_FOR = "retranslate_for"
         private const val EXTRA_USE_CLAUDE = "use_claude"
+        private const val EXTRA_AUDIO_LANG = "audio_lang"
 
         private val _state = MutableStateFlow<DownloadState>(DownloadState.Idle)
         val state: StateFlow<DownloadState> = _state
@@ -267,6 +277,7 @@ class DownloadService : Service() {
                 .putExtra(EXTRA_URL, task.url)
                 .putExtra(EXTRA_QUALITY, task.quality.name)
                 .putExtra(EXTRA_SUBTITLES, task.withSubtitles)
+                .putExtra(EXTRA_AUDIO_LANG, task.audioLanguage.name)
                 .putExtra(EXTRA_SUBTITLE_FOR, task.subtitleFor)
                 .putExtra(EXTRA_RETRANSLATE_FOR, task.retranslateFor)
                 .putExtra(EXTRA_USE_CLAUDE, task.useClaude)
@@ -274,11 +285,18 @@ class DownloadService : Service() {
             return true
         }
 
-        fun start(context: Context, url: String, quality: Quality, withSubtitles: Boolean) {
+        fun start(
+            context: Context,
+            url: String,
+            quality: Quality,
+            withSubtitles: Boolean,
+            audioLanguage: AudioLanguage,
+        ) {
             val intent = Intent(context, DownloadService::class.java)
                 .putExtra(EXTRA_URL, url)
                 .putExtra(EXTRA_QUALITY, quality.name)
                 .putExtra(EXTRA_SUBTITLES, withSubtitles)
+                .putExtra(EXTRA_AUDIO_LANG, audioLanguage.name)
             ContextCompat.startForegroundService(context, intent)
         }
 

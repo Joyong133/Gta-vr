@@ -31,6 +31,8 @@ data class MediaStream(
     val contentLength: Long,
     /** 더빙이 아닌 원래 소리 트랙인지 */
     val originalAudio: Boolean = true,
+    /** 소리 트랙 언어 코드 (ko, en …). 모르면 빈 문자열 */
+    val audioLang: String = "",
 ) {
     enum class Kind { VIDEO_ONLY, MUXED, AUDIO }
 
@@ -116,6 +118,7 @@ object VideoSource {
                         if (it.format == MediaFormat.M4A) "m4a" else it.format?.suffix ?: "m4a",
                         it.codec.orEmpty(), 0, it.averageBitrate, it.itagItem?.contentLength ?: -1,
                         originalAudio = it.audioTrackType == null || it.audioTrackType == AudioTrackType.ORIGINAL,
+                        audioLang = it.audioLocale?.language.orEmpty().lowercase(),
                     )
                 )
             }
@@ -338,6 +341,9 @@ object VideoSource {
                     bitrate = f.optInt("averageBitrate", f.optInt("bitrate")),
                     contentLength = f.optString("contentLength").toLongOrNull() ?: -1,
                     originalAudio = track == null || track.optBoolean("audioIsDefault", true),
+                    // audioTrack.id 예: "ko.4", "en-US.3"
+                    audioLang = track?.optString("id").orEmpty()
+                        .substringBefore('.').substringBefore('-').lowercase(),
                 )
             }
         }

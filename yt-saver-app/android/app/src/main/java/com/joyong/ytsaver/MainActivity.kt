@@ -109,6 +109,16 @@ class MainActivity : AppCompatActivity() {
 
         updateAccountUi()
         b.toolbar.setOnMenuItemClickListener { item ->
+            if (item.itemId == MENU_FOCUS) {
+                val on = !WatchHistory.focusMode(this)
+                prefs.edit().putBoolean("focus_mode", on).apply()
+                updateAccountUi()
+                toast(
+                    if (on) "집중 모드 켬: 이미 본 부분까지만 이동할 수 있어요"
+                    else "집중 모드 끔"
+                )
+                return@setOnMenuItemClickListener true
+            }
             if (item.itemId == MENU_AI) {
                 showAiSettings()
                 return@setOnMenuItemClickListener true
@@ -139,6 +149,23 @@ class MainActivity : AppCompatActivity() {
         val savedQuality = prefs.getString("quality", Quality.P720.name)
         Quality.entries.forEach { q ->
             chipFor(q).isChecked = q.name == savedQuality
+        }
+
+        updateAudioLanguageButton()
+        b.audioLangButton.setOnClickListener {
+            val all = AudioLanguage.entries
+            MaterialAlertDialogBuilder(this)
+                .setTitle("저장할 소리 언어")
+                .setSingleChoiceItems(
+                    all.map { if (it == AudioLanguage.ORIGINAL) "원래 언어 (기본)" else "${it.label} (더빙 있으면)" }
+                        .toTypedArray(),
+                    all.indexOf(audioLanguage()),
+                ) { d, which ->
+                    prefs.edit().putString("audio_lang", all[which].name).apply()
+                    updateAudioLanguageButton()
+                    d.dismiss()
+                }
+                .show()
         }
 
         b.subtitleSwitch.isChecked = prefs.getBoolean("subtitles", true)
@@ -330,7 +357,7 @@ class MainActivity : AppCompatActivity() {
         }
         val quality = selectedQuality()
         prefs.edit().putString("quality", quality.name).apply()
-        DownloadService.start(this, url, quality, b.subtitleSwitch.isChecked)
+        DownloadService.start(this, url, quality, b.subtitleSwitch.isChecked, audioLanguage())
         b.urlInput.setText("")
         getSystemService(InputMethodManager::class.java)
             .hideSoftInputFromWindow(b.urlInput.windowToken, 0)
@@ -631,6 +658,14 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun audioLanguage(): AudioLanguage =
+        runCatching { AudioLanguage.valueOf(prefs.getString("audio_lang", "ORIGINAL")!!) }
+            .getOrDefault(AudioLanguage.ORIGINAL)
+
+    private fun updateAudioLanguageButton() {
+        b.audioLangButton.text = "소리 언어: ${audioLanguage().label}"
+    }
+
     private fun askLogin() {
         MaterialAlertDialogBuilder(this)
             .setTitle("유튜브 로그인")
@@ -648,17 +683,27 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateAccountUi() {
         val loggedIn = YouTubeAccount.isLoggedIn(this)
-        b.toolbar.subtitle = "v${App.versionName}" + if (loggedIn) " · 유튜브 로그인됨" else ""
+        val focus = WatchHistory.focusMode(this)
+        b.toolbar.subtitle = "v${App.versionName}" +
+            (if (loggedIn) " · 유튜브 로그인됨" else "") +
+            (if (focus) " · 🎯 집중 모드" else "")
+        // 집중 모드에서는 빨리 감기 버튼을 숨긴다 (막대를 앞으로 끌어도 본 곳까지만 이동)
+        b.playerView.setShowFastForwardButton(!focus)
         b.toolbar.menu.clear()
         b.toolbar.menu.add(0, MENU_LOGIN, 0, if (loggedIn) "로그아웃" else "유튜브 로그인")
             .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
-        b.toolbar.menu.add(0, MENU_AI, 1, "Claude 번역 설정 (유료, 선택)")
+        b.toolbar.menu.add(0, MENU_FOCUS, 1, "🎯 집중 모드 (앞으로 건너뛰기 막기)")
+            .setCheckable(true)
+            .setChecked(focus)
+            .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
+        b.toolbar.menu.add(0, MENU_AI, 2, "Claude 번역 설정 (유료, 선택)")
             .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
     }
 
     companion object {
         private const val MENU_LOGIN = 1
         private const val MENU_AI = 2
+        private const val MENU_FOCUS = 3
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()

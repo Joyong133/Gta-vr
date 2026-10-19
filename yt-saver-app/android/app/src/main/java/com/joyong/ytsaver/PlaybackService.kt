@@ -7,7 +7,9 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import androidx.annotation.OptIn
+import android.widget.Toast
 import androidx.media3.common.AudioAttributes
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -47,6 +49,24 @@ class PlaybackService : MediaSessionService() {
     private var lastId: String? = null
     private var lastPosition = 0L
     private var lastDuration = 0L
+
+    /** 1초마다 "실제로 본" 가장 먼 위치를 갱신 (건너뛴 부분은 포함하지 않음) */
+    private val watchTracker = object : Runnable {
+        override fun run() {
+            trackMaxWatched()
+            handler.postDelayed(this, 1_000)
+        }
+    }
+
+    private fun trackMaxWatched() {
+        val id = player.currentMediaItem?.mediaId ?: return
+        val position = player.currentPosition
+        val max = WatchHistory.maxWatched(this, id)
+        // 이어서 재생한 경우만 인정: 지금 위치가 기록보다 조금(3초 이내) 앞이면 갱신
+        if (position > max && position - max <= 3_000) {
+            WatchHistory.setMaxWatched(this, id, position)
+        }
+    }
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -117,7 +137,7 @@ class PlaybackService : MediaSessionService() {
                 }
             }
 
-        session = MediaSession.Builder(this, player)
+        session = MediaSession.Builder(this, FocusModePlayer(player))
             .setSessionActivity(openApp)
             .setCallback(callback)
             .build()
@@ -151,7 +171,11 @@ class PlaybackService : MediaSessionService() {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             persist()
             handler.removeCallbacks(ticker)
-            if (isPlaying) handler.postDelayed(ticker, 5_000)
+            handler.removeCallbacks(watchTracker)
+            if (isPlaying) {
+                handler.postDelayed(ticker, 5_000)
+                handler.postDelayed(watchTracker, 1_000)
+            }
         }
 
         override fun onPositionDiscontinuity(
@@ -189,6 +213,7 @@ class PlaybackService : MediaSessionService() {
             if (playbackState == Player.STATE_ENDED) {
                 player.currentMediaItem?.mediaId?.let {
                     WatchHistory.markFinished(this@PlaybackService, it)
+                    if (player.duration > 0) WatchHistory.setMaxWatched(this@PlaybackService, it, player.duration)
                 }
             }
         }
@@ -244,6 +269,7 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         persist()
         handler.removeCallbacks(ticker)
+        handler.removeCallbacks(watchTracker)
         session?.run {
             player.release()
             release()
@@ -255,6 +281,59 @@ class PlaybackService : MediaSessionService() {
         }
         bgSession = null
         super.onDestroy()
+    }
+}
+
+/**
+ * 집중 모드: 아직 보지 않은 앞부분으로는 넘어갈 수 없다(이미 본 부분까지만 이동).
+ * 앱 화면·알림·블루투스 등 모든 컨트롤이 이 플레이어를 거친다.
+ */
+@OptIn(UnstableApi::class)
+class FocusModePlayer(private val exo: ExoPlayer) : ForwardingPlayer(exo) {
+
+    private val context get() = App.instance
+
+    private fun allowedUntil(index: Int): Long? {
+        if (!WatchHistory.focusMode(context) || index !in 0 until mediaItemCount) return null
+        val id = getMediaItemAt(index).mediaId
+        return WatchHistory.maxWatched(context, id) + 1_000
+    }
+
+    private fun clamp(index: Int, positionMs: Long): Long {
+        val limit = allowedUntil(index) ?: return positionMs
+        if (positionMs <= limit) return positionMs
+        Toast.makeText(context, "집중 모드: 아직 안 본 부분으로는 넘어갈 수 없어요", Toast.LENGTH_SHORT).show()
+        return limit
+    }
+
+    /** 현재 영상을 끝까지 봤는지 */
+    private fun currentFinished(): Boolean {
+        val id = currentMediaItem?.mediaId ?: return true
+        val duration = duration
+        return duration > 0 && WatchHistory.maxWatched(context, id) >= duration - 5_000
+    }
+
+    override fun seekTo(positionMs: Long) = super.seekTo(clamp(currentMediaItemIndex, positionMs))
+
+    override fun seekTo(mediaItemIndex: Int, positionMs: Long) =
+        super.seekTo(mediaItemIndex, clamp(mediaItemIndex, positionMs))
+
+    override fun seekForward() = seekTo(currentPosition + seekForwardIncrement)
+
+    override fun seekToNext() {
+        if (blockNext()) return
+        super.seekToNext()
+    }
+
+    override fun seekToNextMediaItem() {
+        if (blockNext()) return
+        super.seekToNextMediaItem()
+    }
+
+    private fun blockNext(): Boolean {
+        if (!WatchHistory.focusMode(context) || currentFinished()) return false
+        Toast.makeText(context, "집중 모드: 이 영상을 다 봐야 다음으로 넘어가요", Toast.LENGTH_SHORT).show()
+        return true
     }
 }
 
