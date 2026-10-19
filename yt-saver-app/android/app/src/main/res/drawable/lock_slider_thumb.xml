@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 흰 원 안의 빨간 화살표 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:width="56dp" android:height="56dp">
+        <shape android:shape="oval">
+            <solid android:color="#FFFFFF" />
+        </shape>
+    </item>
+    <item
+        android:width="28dp"
+        android:height="28dp"
+        android:gravity="center">
+        <vector
+            android:width="28dp"
+            android:height="28dp"
+            android:viewportWidth="24"
+            android:viewportHeight="24">
+            <path
+                android:fillColor="#E53935"
+                android:pathData="M8.59,16.59L13.17,12 8.59,7.41 10,6l6,6 -6,6z" />
+        </vector>
+    </item>
+</layer-list>

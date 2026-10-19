@@ -14,7 +14,8 @@ import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.IntentFilter
-import android.view.WindowManager
+import android.net.Uri
+import android.provider.Settings
 import android.text.InputType
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -110,8 +111,6 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         b = ActivityMainBinding.inflate(layoutInflater)
         setContentView(b.root)
-        // 화면이 꺼지기 전에 미리 적용해 둬야 다시 켤 때 잠금 화면 위에 바로 뜬다
-        applyShowWhenLocked()
 
         ViewCompat.setOnApplyWindowInsetsListener(b.root) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -123,14 +122,7 @@ class MainActivity : AppCompatActivity() {
         updateAccountUi()
         b.toolbar.setOnMenuItemClickListener { item ->
             if (item.itemId == MENU_LOCK) {
-                val on = !lockScreenEnabled()
-                prefs.edit().putBoolean("lock_screen", on).apply()
-                applyShowWhenLocked()
-                updateAccountUi()
-                toast(
-                    if (on) "켰어요: 이 앱을 보다가 화면을 끄면, 다시 켤 때 잠금 해제 없이 이 화면이 먼저 나와요"
-                    else "잠금화면에서 바로 보기를 껐어요"
-                )
+                toggleCustomLockScreen()
                 return@setOnMenuItemClickListener true
             }
             if (item.itemId == MENU_FOCUS) {
@@ -325,6 +317,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (pendingLockScreen) {
+            pendingLockScreen = false
+            if (Settings.canDrawOverlays(this)) enableCustomLockScreen()
+            else toast("권한이 없어서 튜브 잠금화면을 켜지 못했어요")
+        }
         ContextCompat.registerReceiver(
             this, unlockReceiver, IntentFilter(Intent.ACTION_USER_PRESENT),
             ContextCompat.RECEIVER_NOT_EXPORTED
@@ -337,18 +334,41 @@ class MainActivity : AppCompatActivity() {
         super.onPause()
     }
 
-    private fun lockScreenEnabled() = prefs.getBoolean("lock_screen", true)
+    /** 권한 설정 화면에 다녀온 뒤 켜기를 마무리하기 위한 표시 */
+    private var pendingLockScreen = false
 
-    /** 설정이 켜져 있으면 잠금 화면 위에 이 화면을 띄운다 (재생 여부와 상관없이) */
-    private fun applyShowWhenLocked() {
-        val show = lockScreenEnabled()
-        if (Build.VERSION.SDK_INT >= 27) {
-            setShowWhenLocked(show)
-        } else {
-            @Suppress("DEPRECATION")
-            if (show) window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
-            else window.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+    private fun toggleCustomLockScreen() {
+        if (LockScreenService.isEnabled(this)) {
+            LockScreenService.setEnabled(this, false)
+            updateAccountUi()
+            toast("튜브 잠금화면을 껐어요")
+            return
         }
+        if (!Settings.canDrawOverlays(this)) {
+            MaterialAlertDialogBuilder(this)
+                .setTitle("권한이 필요해요")
+                .setMessage(
+                    "화면을 켤 때마다 튜브 잠금화면을 먼저 띄우려면 " +
+                        "\"다른 앱 위에 표시\" 권한이 필요해요.\n\n" +
+                        "다음 화면에서 튜브 보관함을 찾아 허용으로 바꾼 뒤 돌아와 주세요."
+                )
+                .setNegativeButton("취소", null)
+                .setPositiveButton("설정 열기") { _, _ ->
+                    pendingLockScreen = true
+                    startActivity(
+                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                    )
+                }
+                .show()
+            return
+        }
+        enableCustomLockScreen()
+    }
+
+    private fun enableCustomLockScreen() {
+        LockScreenService.setEnabled(this, true)
+        updateAccountUi()
+        toast("켰어요! 화면을 껐다 켜면 튜브 잠금화면이 먼저 나와요. 밀어서 잠금 해제하세요")
     }
 
     /** 잠금 화면 위에서는 재생·목록만, 잠금을 풀면 전체 기능 */
@@ -764,9 +784,9 @@ class MainActivity : AppCompatActivity() {
             .setCheckable(true)
             .setChecked(focus)
             .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
-        b.toolbar.menu.add(0, MENU_LOCK, 2, "🔓 잠금화면에서 바로 보기")
+        b.toolbar.menu.add(0, MENU_LOCK, 2, "🔒 튜브 잠금화면 (화면 켜면 항상 먼저)")
             .setCheckable(true)
-            .setChecked(lockScreenEnabled())
+            .setChecked(LockScreenService.isEnabled(this))
             .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
         b.toolbar.menu.add(0, MENU_AI, 3, "Claude 번역 설정 (유료, 선택)")
             .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)

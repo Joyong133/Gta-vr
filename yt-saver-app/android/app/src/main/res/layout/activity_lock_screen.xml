@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#101014">
+
+    <!-- 지금 영상 썸네일을 흐리게 깐 배경 -->
+    <ImageView
+        android:id="@+id/background"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0.35"
+        android:contentDescription="@null"
+        android:scaleType="centerCrop" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/lock_gradient" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fitsSystemWindows="true"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextClock
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="64dp"
+            android:format12Hour="h:mm"
+            android:format24Hour="H:mm"
+            android:textColor="#FFFFFF"
+            android:textSize="76sp"
+            android:fontFamily="sans-serif-light" />
+
+        <TextClock
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:format12Hour="M월 d일 EEEE"
+            android:format24Hour="M월 d일 EEEE"
+            android:textColor="#DDFFFFFF"
+            android:textSize="18sp" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <!-- 지금(또는 마지막으로) 보던 영상 -->
+        <LinearLayout
+            android:id="@+id/mediaCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/lock_card"
+            android:gravity="center_vertical"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/thumb"
+                    android:layout_width="96dp"
+                    android:layout_height="54dp"
+                    android:background="#33FFFFFF"
+                    android:contentDescription="썸네일"
+                    android:scaleType="centerCrop" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/title"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:maxLines="2"
+                        android:textColor="#FFFFFF"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/uploader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        android:textColor="#BBFFFFFF"
+                        android:textSize="13sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <ImageButton
+                    android:id="@+id/prev"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="이전"
+                    android:src="@android:drawable/ic_media_previous"
+                    app:tint="#FFFFFF" />
+
+                <ImageButton
+                    android:id="@+id/playPause"
+                    android:layout_width="64dp"
+                    android:layout_height="64dp"
+                    android:layout_marginHorizontal="16dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="재생/일시정지"
+                    android:src="@android:drawable/ic_media_play"
+                    app:tint="#FFFFFF" />
+
+                <ImageButton
+                    android:id="@+id/next"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="다음"
+                    android:src="@android:drawable/ic_media_next"
+                    app:tint="#FFFFFF" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 밀어서 잠금 해제 -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:layout_marginTop="32dp"
+            android:layout_marginBottom="24dp"
+            android:background="@drawable/lock_slider_track">
+
+            <TextView
+                android:id="@+id/slideHint"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:text="밀어서 잠금 해제  ›››"
+                android:textColor="#EEFFFFFF"
+                android:textSize="17sp" />
+
+            <SeekBar
+                android:id="@+id/slider"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:max="100"
+                android:paddingStart="32dp"
+                android:paddingEnd="32dp"
+                android:progressDrawable="@android:color/transparent"
+                android:splitTrack="false"
+                android:thumb="@drawable/lock_slider_thumb"
+                android:thumbOffset="28dp" />
+        </FrameLayout>
+    </LinearLayout>
+</FrameLayout>

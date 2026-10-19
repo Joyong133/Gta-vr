@@ -27,11 +27,16 @@ class App : Application() {
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_DONE, "저장 완료", NotificationManager.IMPORTANCE_DEFAULT)
         )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_LOCK, "튜브 잠금화면", NotificationManager.IMPORTANCE_MIN)
+        )
+        LockScreenService.start(this)
     }
 
     companion object {
         const val CHANNEL_DOWNLOAD = "download"
         const val CHANNEL_DONE = "download_done"
+        const val CHANNEL_LOCK = "lock_screen"
 
         lateinit var instance: App
             private set
