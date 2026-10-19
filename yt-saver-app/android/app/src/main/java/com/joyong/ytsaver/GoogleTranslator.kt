@@ -59,8 +59,26 @@ object GoogleTranslator {
         return out
     }
 
-    private fun request(text: String, sourceLang: String): String {
-        val url = "$URL?client=gtx&sl=$sourceLang&tl=ko&dt=t"
+    /** 짧은 문장 하나 번역 (검색어 번역용). sl=auto면 언어 자동 감지 */
+    fun translateText(text: String, targetLang: String, sourceLang: String = "auto"): String =
+        request(text, sourceLang, targetLang).trim()
+
+    /** 문장의 언어 코드 감지 (ko, en, ja …). 실패하면 null */
+    fun detectLanguage(text: String): String? = runCatching {
+        val url = "$URL?client=gtx&sl=auto&tl=en&dt=t"
+        val request = Request.Builder()
+            .url(url)
+            .post(FormBody.Builder().add("q", text).build())
+            .header("User-Agent", NetDownloader.USER_AGENT)
+            .build()
+        App.http.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) return@runCatching null
+            JSONArray(resp.body?.string().orEmpty()).optString(2).takeIf { it.isNotEmpty() }
+        }
+    }.getOrNull()
+
+    private fun request(text: String, sourceLang: String, targetLang: String = "ko"): String {
+        val url = "$URL?client=gtx&sl=$sourceLang&tl=$targetLang&dt=t"
         val request = Request.Builder()
             .url(url)
             .post(FormBody.Builder().add("q", text).build())

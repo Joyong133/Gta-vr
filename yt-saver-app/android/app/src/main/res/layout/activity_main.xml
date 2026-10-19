@@ -306,6 +306,13 @@
                         android:layout_weight="1"
                         android:text="저장하기" />
                 </LinearLayout>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/findButton"
+                    style="?attr/materialButtonTonalStyle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🔍 키워드로 영상 찾기" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

@@ -1,6 +1,12 @@
 package com.joyong.ytsaver
 
 import android.animation.ObjectAnimator
+import android.content.ClipboardManager
+import android.view.inputmethod.InputMethodManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
 import android.app.KeyguardManager
 import android.content.ComponentName
 import android.content.Intent
@@ -84,6 +90,55 @@ class LockScreenActivity : AppCompatActivity() {
             }
         })
 
+        // 잠금 상태에서도 저장: 입력창이 비어 있으면 클립보드의 링크를 쓴다
+        b.saveButton.setOnClickListener {
+            val typed = b.urlInput.text?.toString().orEmpty()
+            val text = typed.ifBlank {
+                getSystemService(ClipboardManager::class.java).primaryClip
+                    ?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
+            }
+            val url = YouTubeSaver.extractUrl(text)
+            if (url == null || runCatching { YouTubeSaver.videoId(url) }.isFailure) {
+                Toast.makeText(this, "유튜브 링크를 넣어 주세요", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            DownloadService.startWithSavedSettings(this, url)
+            b.urlInput.setText("")
+            getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(b.urlInput.windowToken, 0)
+            Toast.makeText(this, "저장을 시작했어요", Toast.LENGTH_SHORT).show()
+        }
+        b.findButton.setOnClickListener { SearchActivity.open(this, fromLock = true) }
+
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    DownloadService.state.collect { s ->
+                        b.downloadStatus.isVisible = s is DownloadState.Running
+                        if (s is DownloadState.Running) {
+                            val pct = if (s.total > 0) " ${s.done * 100 / s.total}%" else ""
+                            b.downloadStatus.text = "⬇ ${s.title}$pct" + (s.status?.let { " · $it" } ?: "")
+                        }
+                    }
+                }
+                launch {
+                    DownloadService.events.collect { e ->
+                        if (e is DownloadService.Event.Saved) {
+                            Toast.makeText(this@LockScreenActivity, "${e.note}: ${e.title}", Toast.LENGTH_SHORT).show()
+                            refreshList()
+                        }
+                    }
+                }
+                launch {
+                    DownloadService.failure.collect { f ->
+                        if (f != null) {
+                            DownloadService.clearFailure()
+                            Toast.makeText(this@LockScreenActivity, f.message, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }
+        }
+
         b.slider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                 b.slideHint.alpha = 1f - progress / 100f
@@ -100,11 +155,7 @@ class LockScreenActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         resetSlider(animate = false)
-        videos = Library.list(this)
-        adapter.submit(videos)
-        b.list.isVisible = videos.isNotEmpty()
-        b.emptyText.isVisible = videos.isEmpty()
-        b.listHeader.text = if (videos.isEmpty()) "저장된 영상" else "저장된 영상 ${videos.size}개"
+        refreshList()
 
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         val future = MediaController.Builder(this, token).buildAsync()
@@ -119,6 +170,14 @@ class LockScreenActivity : AppCompatActivity() {
             render()
         }, MoreExecutors.directExecutor())
         render()
+    }
+
+    private fun refreshList() {
+        videos = Library.list(this)
+        adapter.submit(videos)
+        b.list.isVisible = videos.isNotEmpty() && !fullscreen
+        b.emptyText.isVisible = videos.isEmpty() && !fullscreen
+        b.listHeader.text = if (videos.isEmpty()) "저장된 영상" else "저장된 영상 ${videos.size}개"
     }
 
     override fun onStop() {
@@ -178,6 +237,8 @@ class LockScreenActivity : AppCompatActivity() {
     private fun setFullscreen(enable: Boolean) {
         fullscreen = enable
         b.clockRow.isVisible = !enable
+        b.saveRow.isVisible = !enable
+        if (enable) b.downloadStatus.isVisible = false
         b.listHeader.isVisible = !enable
         b.list.isVisible = !enable && videos.isNotEmpty()
         b.emptyText.isVisible = !enable && videos.isEmpty()

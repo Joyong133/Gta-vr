@@ -300,6 +300,16 @@ class DownloadService : Service() {
             ContextCompat.startForegroundService(context, intent)
         }
 
+        /** 저장 화면에서 마지막으로 고른 화질·자막·소리 언어로 저장 (검색 결과·잠금화면용) */
+        fun startWithSavedSettings(context: Context, url: String) {
+            val p = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            val quality = runCatching { Quality.valueOf(p.getString("quality", Quality.P720.name)!!) }
+                .getOrDefault(Quality.P720)
+            val audio = runCatching { AudioLanguage.valueOf(p.getString("audio_lang", "ORIGINAL")!!) }
+                .getOrDefault(AudioLanguage.ORIGINAL)
+            start(context, url, quality, p.getBoolean("subtitles", true), audio)
+        }
+
         fun retranslate(context: Context, videoId: String, useClaude: Boolean) {
             val intent = Intent(context, DownloadService::class.java)
                 .putExtra(EXTRA_RETRANSLATE_FOR, videoId)

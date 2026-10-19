@@ -47,6 +47,11 @@
             android:name=".LoginActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".SearchActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- 튜브 잠금화면: 시스템 잠금화면 위에 먼저 뜨는 화면 -->
         <activity
             android:name=".LockScreenActivity"

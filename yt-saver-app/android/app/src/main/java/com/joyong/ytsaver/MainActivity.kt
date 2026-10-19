@@ -196,6 +196,7 @@ class MainActivity : AppCompatActivity() {
             refreshList()
         }
 
+        b.findButton.setOnClickListener { SearchActivity.open(this) }
         b.saveButton.setOnClickListener { startSave(b.urlInput.text?.toString().orEmpty()) }
         b.pasteButton.setOnClickListener {
             val clip = getSystemService(ClipboardManager::class.java).primaryClip
