@@ -26,6 +26,9 @@
   서버 측 거절 폴백 `fallbacks: "default"`). 실패하면 유튜브 자동 번역 → ML Kit 순서로 넘어간다.
   이미 저장한 영상은 길게 눌러 "AI(Claude)로 한국어 자막 다시 번역" → 저장된 `sub_orig.vtt`를 다시 번역하므로
   유튜브 접속이 필요 없다. 키는 앱 전용 SharedPreferences에만 보관.
+- **백그라운드 모드** (메뉴 → "🎧 백그라운드 모드"): 켜면 `setHandleAudioBecomingNoisy(false)`로 이어폰·블루투스 기기를
+  끄거나 연결이 끊겨도 멈추지 않고 폰 스피커로 계속 재생(설정을 바꾸면 서비스가 바로 반영). 켤 때 배터리 최적화
+  예외(`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`)를 요청해 화면이 꺼진 동안 재생이 끊기지 않게 한다.
 - **집중 모드**: 메뉴 → "🎯 집중 모드". 켜면 아직 안 본 앞부분으로 이동할 수 없고 이미 본 곳까지만 이동된다.
   `PlaybackService`가 1초마다 이어서 재생한 가장 먼 위치(`m_<id>`)를 기록하고(3초 넘게 건너뛴 위치는 인정 안 함),
   세션 플레이어를 `FocusModePlayer`(ForwardingPlayer)로 감싸 화면·알림·블루투스의 모든 이동 명령을 그 위치로 제한.

@@ -86,13 +86,15 @@ class PlaybackService : MediaSessionService() {
                     .build(),
                 true
             )
-            .setHandleAudioBecomingNoisy(true)
+            // 백그라운드 모드면 이어폰·블루투스가 끊겨도 멈추지 않고 폰 스피커로 계속
+            .setHandleAudioBecomingNoisy(!backgroundMode(this))
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .setPreferredTextLanguage("ko")
             .build()
         player.addListener(historyListener)
+        settingsPrefs().registerOnSharedPreferenceChangeListener(settingsListener)
 
         val openApp = PendingIntent.getActivity(
             this, 0,
@@ -264,9 +266,22 @@ class PlaybackService : MediaSessionService() {
     companion object {
         const val BG_SESSION_ID = "background_audio"
         const val HINT_SESSION = "session"
+        const val KEY_BACKGROUND_MODE = "background_mode"
+
+        fun backgroundMode(context: Context) =
+            context.getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean(KEY_BACKGROUND_MODE, false)
     }
 
+    private fun settingsPrefs() = getSharedPreferences("settings", MODE_PRIVATE)
+
+    /** 설정 화면에서 백그라운드 모드를 바꾸면 바로 반영 */
+    private val settingsListener =
+        android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_BACKGROUND_MODE) player.setHandleAudioBecomingNoisy(!backgroundMode(this))
+        }
+
     override fun onDestroy() {
+        settingsPrefs().unregisterOnSharedPreferenceChangeListener(settingsListener)
         persist()
         handler.removeCallbacks(ticker)
         handler.removeCallbacks(watchTracker)

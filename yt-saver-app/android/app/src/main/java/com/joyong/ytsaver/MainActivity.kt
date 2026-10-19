@@ -121,6 +121,10 @@ class MainActivity : AppCompatActivity() {
 
         updateAccountUi()
         b.toolbar.setOnMenuItemClickListener { item ->
+            if (item.itemId == MENU_BACKGROUND) {
+                toggleBackgroundMode()
+                return@setOnMenuItemClickListener true
+            }
             if (item.itemId == MENU_LOCK) {
                 toggleCustomLockScreen()
                 return@setOnMenuItemClickListener true
@@ -333,6 +337,42 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         runCatching { unregisterReceiver(unlockReceiver) }
         super.onPause()
+    }
+
+    /**
+     * 백그라운드 모드: 이어폰·블루투스 기기를 꺼도 멈추지 않고 폰 스피커로 계속 재생하고,
+     * 배터리 절약 때문에 재생이 끊기지 않도록 배터리 최적화 예외를 요청한다.
+     */
+    private fun toggleBackgroundMode() {
+        val on = !PlaybackService.backgroundMode(this)
+        prefs.edit().putBoolean(PlaybackService.KEY_BACKGROUND_MODE, on).apply()
+        updateAccountUi()
+        if (!on) {
+            toast("백그라운드 모드를 껐어요 (이어폰을 빼면 멈춰요)")
+            return
+        }
+        val power = getSystemService(android.os.PowerManager::class.java)
+        if (power.isIgnoringBatteryOptimizations(packageName)) {
+            toast("백그라운드 모드 켬: 이어폰·블루투스를 꺼도 계속 재생해요")
+            return
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("백그라운드 모드 켬")
+            .setMessage(
+                "이어폰·블루투스를 꺼도 폰 스피커로 계속 재생해요.\n\n" +
+                    "화면을 꺼 두면 휴대폰이 배터리를 아끼려고 재생을 멈추는 경우가 있어요. " +
+                    "다음 창에서 \"허용\"을 누르면 튜브 보관함은 배터리 절약에서 빠져서 소리가 끊기지 않아요."
+            )
+            .setNegativeButton("나중에", null)
+            .setPositiveButton("허용하러 가기") { _, _ -> requestIgnoreBatteryOptimization() }
+            .show()
+    }
+
+    @android.annotation.SuppressLint("BatteryLife")
+    private fun requestIgnoreBatteryOptimization() {
+        val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
+        val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        runCatching { startActivity(direct) }.onFailure { runCatching { startActivity(fallback) } }
     }
 
     /** 권한 설정 화면에 다녀온 뒤 켜기를 마무리하기 위한 표시 */
@@ -775,7 +815,8 @@ class MainActivity : AppCompatActivity() {
         val focus = WatchHistory.focusMode(this)
         b.toolbar.subtitle = "v${App.versionName}" +
             (if (loggedIn) " · 유튜브 로그인됨" else "") +
-            (if (focus) " · 🎯 집중 모드" else "")
+            (if (focus) " · 🎯 집중 모드" else "") +
+            (if (PlaybackService.backgroundMode(this)) " · 🎧" else "")
         // 집중 모드에서는 빨리 감기 버튼을 숨긴다 (막대를 앞으로 끌어도 본 곳까지만 이동)
         b.playerView.setShowFastForwardButton(!focus)
         b.toolbar.menu.clear()
@@ -789,7 +830,11 @@ class MainActivity : AppCompatActivity() {
             .setCheckable(true)
             .setChecked(LockScreenService.isEnabled(this))
             .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
-        b.toolbar.menu.add(0, MENU_AI, 3, "Claude 번역 설정 (유료, 선택)")
+        b.toolbar.menu.add(0, MENU_BACKGROUND, 3, "🎧 백그라운드 모드 (이어폰 꺼도 계속)")
+            .setCheckable(true)
+            .setChecked(PlaybackService.backgroundMode(this))
+            .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
+        b.toolbar.menu.add(0, MENU_AI, 4, "Claude 번역 설정 (유료, 선택)")
             .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
     }
 
@@ -798,6 +843,7 @@ class MainActivity : AppCompatActivity() {
         private const val MENU_AI = 2
         private const val MENU_FOCUS = 3
         private const val MENU_LOCK = 4
+        private const val MENU_BACKGROUND = 5
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
