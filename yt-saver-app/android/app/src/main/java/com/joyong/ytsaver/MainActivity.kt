@@ -351,6 +351,10 @@ class MainActivity : AppCompatActivity() {
             toast("백그라운드 모드를 껐어요 (이어폰을 빼면 멈춰요)")
             return
         }
+        if (PlaybackService.isQuest()) {
+            showQuestGuide()
+            return
+        }
         val power = getSystemService(android.os.PowerManager::class.java)
         if (power.isIgnoringBatteryOptimizations(packageName)) {
             toast("백그라운드 모드 켬: 이어폰·블루투스를 꺼도 계속 재생해요")
@@ -365,6 +369,24 @@ class MainActivity : AppCompatActivity() {
             )
             .setNegativeButton("나중에", null)
             .setPositiveButton("허용하러 가기") { _, _ -> requestIgnoreBatteryOptimization() }
+            .show()
+    }
+
+    /** 메타 퀘스트: 앱 쪽 설정 + 헤드셋에서 바꿔 두면 좋은 설정 안내 */
+    private fun showQuestGuide() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("🎧 백그라운드 모드 켬 (메타 퀘스트)")
+            .setMessage(
+                "앱을 최소화하거나 다른 앱을 열어도, 퀘스트 시스템이 소리를 가져가도 멈추지 않고 계속 재생해요.\n\n" +
+                    "다만 헤드셋을 벗거나 전원 버튼을 눌러 퀘스트가 잠자기 모드로 들어가면, " +
+                    "퀘스트 시스템이 앱을 멈출 수 있어요(앱에서 막을 수 없는 부분이에요).\n\n" +
+                    "소리가 끊기면 헤드셋 설정에서 이렇게 해 보세요:\n" +
+                    "• 설정 → 시스템 → 전원(Power)에서 자동 절전·화면 꺼짐 시간을 가장 길게\n" +
+                    "• 이 앱은 '창 닫기(X)' 대신 최소화하거나 다른 창을 띄워 두기\n" +
+                    "• 다음 화면에서 배터리 최적화 예외를 허용하기"
+            )
+            .setNegativeButton("닫기", null)
+            .setPositiveButton("배터리 예외 허용") { _, _ -> requestIgnoreBatteryOptimization() }
             .show()
     }
 

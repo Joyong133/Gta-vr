@@ -79,13 +79,8 @@ class PlaybackService : MediaSessionService() {
         super.onCreate()
         player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(SavedMediaSourceFactory(this))
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(C.USAGE_MEDIA)
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
-                    .build(),
-                true
-            )
+            // 백그라운드 모드면 시스템·다른 앱이 소리를 가져가도(오디오 포커스) 멈추지 않는다
+            .setAudioAttributes(MAIN_AUDIO, !backgroundMode(this))
             // 백그라운드 모드면 이어폰·블루투스가 끊겨도 멈추지 않고 폰 스피커로 계속
             .setHandleAudioBecomingNoisy(!backgroundMode(this))
             .setWakeMode(C.WAKE_MODE_LOCAL)
@@ -268,6 +263,17 @@ class PlaybackService : MediaSessionService() {
         const val HINT_SESSION = "session"
         const val KEY_BACKGROUND_MODE = "background_mode"
 
+        private val MAIN_AUDIO = AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+            .build()
+
+        /** 메타 퀘스트 같은 VR 헤드셋인지 */
+        fun isQuest(): Boolean {
+            val id = "${android.os.Build.MANUFACTURER} ${android.os.Build.BRAND} ${android.os.Build.MODEL}".lowercase()
+            return "oculus" in id || "quest" in id || "meta" in id
+        }
+
         fun backgroundMode(context: Context) =
             context.getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean(KEY_BACKGROUND_MODE, false)
     }
@@ -277,7 +283,11 @@ class PlaybackService : MediaSessionService() {
     /** 설정 화면에서 백그라운드 모드를 바꾸면 바로 반영 */
     private val settingsListener =
         android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == KEY_BACKGROUND_MODE) player.setHandleAudioBecomingNoisy(!backgroundMode(this))
+            if (key == KEY_BACKGROUND_MODE) {
+                val bg = backgroundMode(this)
+                player.setHandleAudioBecomingNoisy(!bg)
+                player.setAudioAttributes(MAIN_AUDIO, !bg)
+            }
         }
 
     override fun onDestroy() {
