@@ -4,7 +4,8 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    # main이 없고 기본 브랜치가 claude/neon-district-vr-dev-6gtq5e라서 둘 다 둔다
+    branches: [main, claude/neon-district-vr-dev-6gtq5e]
   workflow_dispatch:
 
 permissions:
