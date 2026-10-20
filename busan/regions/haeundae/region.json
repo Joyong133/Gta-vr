@@ -253,5 +253,6 @@
   "trees": 86620,
   "buildings": 25466
  },
- "attribution": "지도: Overture Maps Foundation (© OpenStreetMap contributors, ODbL) · 지형: AWS Terrain Tiles (Mapzen)"
+ "attribution": "지도: Overture Maps Foundation (© OpenStreetMap contributors, ODbL) · 지형: AWS Terrain Tiles (Mapzen)",
+ "version": 1792468800
 }

@@ -5,9 +5,13 @@
  *
  * 지역 로딩, 장소 이동(옥상 착지 포함), 데스크톱 이동/건물 충돌, XR 세션과 컨트롤러 입력
  * (이동·스냅 회전·텔레포트·비행·거인 모드·장소 버튼)을 확인하고 스크린샷을 남긴다.
+ * 마지막으로 GitHub Pages "Deploy from a branch"(저장소 파일을 빌드 없이 그대로 서비스)를 흉내 내
+ * /busan/ 과 / 가 미리 빌드된 busan/play/ 로 넘어가 로딩을 끝내는지 확인한다.
  * 실제 헤드셋의 프레임레이트/편안함을 대신하지는 않는다.
  */
-import { mkdirSync } from 'node:fs';
+import { createReadStream, mkdirSync, statSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { extname, join, normalize } from 'node:path';
 import { preview } from 'vite';
 import { chromium } from 'playwright-core';
 
@@ -15,6 +19,24 @@ const OUT = new URL('./out/', import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 const CHROME = process.env.CHROME_PATH ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const PORT = 4192;
+
+/** GitHub Pages 브랜치 배포처럼 저장소 파일을 /Gta-vr/ 아래에 그대로 내보낸다(.ts는 video/mp2t). */
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.ts': 'video/mp2t', '.json': 'application/json', '.glb': 'model/gltf-binary', '.bin': 'application/octet-stream', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png' };
+const REPO = new URL('../../', import.meta.url).pathname;
+const pages = createServer((req, res) => {
+  const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  if (!path.startsWith('/Gta-vr/')) return res.writeHead(404).end();
+  let file = normalize(join(REPO, path.slice('/Gta-vr/'.length)));
+  if (!file.startsWith(REPO)) return res.writeHead(403).end();
+  try {
+    if (statSync(file).isDirectory()) file = join(file, 'index.html');
+    statSync(file);
+  } catch {
+    return res.writeHead(404).end();
+  }
+  res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream' });
+  createReadStream(file).pipe(res);
+}).listen(4193, '127.0.0.1');
 
 const server = await preview({ preview: { port: PORT, strictPort: true, host: '127.0.0.1' }, logLevel: 'error' });
 const browser = await chromium.launch({
@@ -208,6 +230,20 @@ try {
   await page.screenshot({ path: `${OUT}busan_xr.png` });
 
   check('페이지 오류 없음', errors.length === 0, errors.join('\n'));
+
+  console.log('E. GitHub Pages 브랜치 배포(빌드 없음) 모드');
+  for (const [path, label] of [['/Gta-vr/busan/', '/busan/'], ['/Gta-vr/', '/ (루트)']]) {
+    const p2 = await browser.newPage({ viewport: { width: 640, height: 360 } });
+    await p2.goto(`http://127.0.0.1:4193${path}`, { waitUntil: 'load' });
+    const ok = await p2
+      .waitForFunction(() => window.busan && window.busan.loaded, null, { timeout: 120000 })
+      .then(() => true)
+      .catch(() => false);
+    const where = new URL(p2.url()).pathname;
+    const status = await p2.evaluate(() => document.getElementById('status')?.textContent ?? '');
+    check(`${label} → busan/play/ 로 넘어가 로딩 완료`, ok && where === '/Gta-vr/busan/play/', JSON.stringify({ where, status }));
+    await p2.close();
+  }
 } catch (e) {
   failures++;
   console.log('  ✗ 예외', e);
@@ -215,6 +251,7 @@ try {
 } finally {
   await browser.close();
   await new Promise((r) => server.httpServer.close(r));
+  pages.close();
 }
 console.log(`\n${passes} 통과, ${failures} 실패`);
 process.exit(failures ? 1 : 0);

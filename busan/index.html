@@ -155,5 +155,12 @@
       </div>
     </div>
     <script type="module" src="./src/main.ts"></script>
+    <script>
+      // GitHub Pages를 "브랜치 그대로" 배포하면 빌드 안 된 TypeScript가 그대로 나가 무한 로딩이 된다.
+      // 원본 그대로인지(.ts 모듈, Vite 개발 서버 아님) 확인해 미리 빌드해 둔 ./play/ 로 넘긴다.
+      if (document.querySelector('script[type="module"][src$=".ts"]') && !document.querySelector('script[src*="@vite/client"]')) {
+        location.replace('./play/' + location.search + location.hash);
+      }
+    </script>
   </body>
 </html>

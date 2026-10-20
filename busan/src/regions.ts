@@ -1,6 +1,7 @@
 /**
  * 지역 자동 등록: busan/regions/<지역>/region.json 이 있으면 목록에 나온다.
- * 에셋(.glb/.bin)은 Vite가 해시 붙은 파일로 내보내고, 여기서 URL로 찾아 준다.
+ * 에셋(.glb/.bin)은 번들에 넣지 않고 페이지 기준 regions/ 폴더에서 그대로 받는다
+ * (VITE_REGION_BASE로 바꿀 수 있음 — 브랜치 그대로 서비스되는 busan/play/ 는 ../regions/).
  *
  * 좌표: 모든 지역이 부산 공통 원점(region.json의 origin) 기준 미터 좌표를 쓴다.
  *   지도 좌표 (x=동, y=북, z=위)  ↔  three.js (x, y=위, z=남)
@@ -53,6 +54,8 @@ export interface RegionInfo {
   spawns: Spawn[];
   stats: Record<string, number>;
   attribution: string;
+  /** 에셋 캐시 무효화용(내보낸 시각) */
+  version?: number;
 }
 
 export interface Region extends RegionInfo {
@@ -61,20 +64,18 @@ export interface Region extends RegionInfo {
 }
 
 const infos = import.meta.glob<RegionInfo>('../regions/*/region.json', { eager: true, import: 'default' });
-const urls = import.meta.glob<string>('../regions/*/*.{glb,bin}', { eager: true, query: '?url', import: 'default' });
+const REGION_BASE: string = import.meta.env.VITE_REGION_BASE ?? './regions/';
 
 export function listRegions(): Region[] {
-  return Object.entries(infos)
-    .map(([path, info]) => {
-      const dir = path.slice(0, path.lastIndexOf('/') + 1);
-      return {
-        ...info,
-        url(file: string): string {
-          const u = urls[dir + file];
-          if (!u) throw new Error(`${info.id}: 에셋 없음 ${file}`);
-          return u;
-        },
-      };
-    })
+  const base = new URL(REGION_BASE, document.baseURI);
+  return Object.values(infos)
+    .map((info) => ({
+      ...info,
+      url(file: string): string {
+        const u = new URL(`${encodeURIComponent(info.id)}/${file}`, base);
+        if (info.version) u.searchParams.set('v', String(info.version));
+        return u.href;
+      },
+    }))
     .sort((a, b) => a.id.localeCompare(b.id));
 }

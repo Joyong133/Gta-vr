@@ -36,6 +36,8 @@
 ```
 busan/
   index.html            부산 VR 페이지 (Vite 두 번째 입력 → 배포 시 /busan/)
+  play/                 브랜치 그대로 배포용 미리 빌드한 페이지 (npm run build:busan-play)
+  vite.play.config.ts   위 빌드 설정
   src/
     main.ts             렌더러·XR 세션·입력(Quest/데스크톱)·타이틀 화면
     World.ts            지역 에셋 로딩, 재질 연결, 거리별 타일 표시(Quest 부하 조절), 나무 인스턴싱
@@ -97,9 +99,15 @@ Blender에서 재질 색(컬러 램프)이나 창문 간격을 고친 뒤 `expor
 
 ## 배포
 
-`.github/workflows/deploy-pages.yml`이 게임(`/`)과 부산 VR(`/busan/`)을 함께 빌드해 GitHub Pages에 올립니다.
-최초 1회: 저장소 Settings → Pages → Source를 **GitHub Actions**로 설정. 이후 기본 브랜치에 push되거나
-Actions 탭에서 `Deploy to GitHub Pages`를 수동 실행하면 배포됩니다. Quest 브라우저에서 위 주소를 열고 `VR로 들어가기`.
+GitHub Pages 설정(Settings → Pages → Source)에 따라 두 가지 모두 동작합니다.
+
+| Source | 어떻게 서비스되나 | 주소 |
+|---|---|---|
+| **Deploy from a branch** (지금 설정) | 저장소 파일을 빌드 없이 그대로 서비스. 원본 `busan/index.html`·루트 `index.html`은 자동으로 미리 빌드된 `busan/play/`로 넘어갑니다 | `/busan/` → `/busan/play/` |
+| **GitHub Actions** | `.github/workflows/deploy-pages.yml`이 빌드해서 게임(`/`)과 부산 VR(`/busan/`)을 올림 | `/busan/` |
+
+`busan/play/`는 빌드 결과물을 커밋해 둔 것입니다. `busan/src`를 고치면 `npm run build:busan-play`로 다시 만들어 같이 커밋하세요.
+지역 에셋은 번들에 넣지 않고 `busan/regions/`에서 그대로 받기 때문에 지역을 추가해도 `busan/play/`를 다시 빌드하면 목록에 나타납니다.
 
 ## 테스트
 

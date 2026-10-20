@@ -12,7 +12,7 @@ Blender 안에서:  blender -b -P export_web.py -- <지역>
 
 .blend는 저장하지 않는다(웹용 감량은 내보낼 때만 적용).
 """
-import json, os, sys
+import json, os, sys, time
 
 import bpy
 import numpy as np
@@ -301,6 +301,7 @@ def main():
         "spawns": [{"name": s["name"], "x": s["xy"][0], "y": s["xy"][1], "yaw": s.get("yaw", 0), "mode": s.get("mode", "walk"), "z": s.get("z", 0)}
                    for s in META.get("spawns", [])],
         "stats": stats,
+        "version": int(time.time()),
         "attribution": "지도: Overture Maps Foundation (© OpenStreetMap contributors, ODbL) · 지형: AWS Terrain Tiles (Mapzen)",
     }
     with open(os.path.join(OUT, "region.json"), "w", encoding="utf-8") as f:

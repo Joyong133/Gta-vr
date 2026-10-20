@@ -124,5 +124,11 @@
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
+    <script>
+      // GitHub Pages "브랜치 그대로" 배포(빌드 없음)로 열렸으면 미리 빌드된 부산 VR로 보낸다
+      if (document.querySelector('script[type="module"][src$=".ts"]') && !document.querySelector('script[src*="@vite/client"]')) {
+        location.replace('./busan/play/' + location.search);
+      }
+    </script>
   </body>
 </html>
